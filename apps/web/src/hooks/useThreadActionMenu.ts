@@ -1,5 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import { moveThreadToLocalCheckout } from "../components/MoveToLocalCheckoutDialog";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -21,6 +22,7 @@ import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
+  readEnvironmentSupportsMoveToLocalCheckout,
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
@@ -140,6 +142,10 @@ export function useThreadActionMenu(input: {
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
+        const threadProject = projects.find(
+          (candidate) =>
+            candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
+        );
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
@@ -151,6 +157,10 @@ export function useThreadActionMenu(input: {
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           isRunning: !threadRuntimeCanArchive(thread.runtime),
+          canMoveToLocalCheckout:
+            thread.worktreePath != null &&
+            threadProject !== undefined &&
+            readEnvironmentSupportsMoveToLocalCheckout(threadRef.environmentId),
           supports,
           snoozePresets,
         });
@@ -180,11 +190,7 @@ export function useThreadActionMenu(input: {
         };
         switch (action) {
           case "project-settings": {
-            const project = projects.find(
-              (candidate) =>
-                candidate.environmentId === thread.environmentId &&
-                candidate.id === thread.projectId,
-            );
+            const project = threadProject;
             if (!project) return;
             const projectKey =
               logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
@@ -211,6 +217,17 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "move-to-local-checkout":
+            if (!thread.worktreePath || !threadProject) return;
+            await moveThreadToLocalCheckout({
+              environmentId: threadRef.environmentId,
+              threadId: thread.id,
+              threadTitle: thread.title,
+              projectRoot: threadProject.workspaceRoot,
+              branch: thread.branch ?? null,
+              worktreePath: thread.worktreePath,
+            });
+            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;

@@ -19,5 +19,10 @@ export function createGitEnvironmentAtoms<R, E>(
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
     }),
+    // The server serializes moves per thread; the input carries no cwd to schedule on.
+    moveThreadToLocalCheckout: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:move-thread-to-local-checkout",
+      tag: WS_METHODS.gitMoveThreadToLocalCheckout,
+    }),
   };
 }
