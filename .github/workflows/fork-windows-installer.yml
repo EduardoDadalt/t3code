@@ -3,6 +3,10 @@ name: Fork Windows installer
 # Fork-only: builds an unsigned Windows x64 NSIS installer of this branch on a
 # GitHub-hosted runner. The version is a `-preview.` build, so the installer
 # carries no update feed and is never replaced by an official update.
+#
+# The WSL backend runs the Linux CLI archive inside the distro, so the Linux
+# job builds that archive first and the Windows job embeds it, as
+# release-desktop.yml does. Without it the WSL backend never comes up.
 
 on:
   push:
@@ -13,8 +17,103 @@ permissions:
   contents: read
 
 jobs:
+  cli_linux:
+    name: Build Linux x64 CLI archive (WSL runtime)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # .repos holds orphaned gitlinks that break actions/checkout's cleanup.
+      - name: Checkout
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c checkout.workers=0 checkout --detach FETCH_HEAD
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Install dependencies
+        run: vp install --filter=t3... --filter=@t3tools/web... --filter=@t3tools/scripts...
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      # The archive name embeds the version, and the Windows build looks the
+      # archive up by its own version, so both jobs share this one.
+      - name: Set preview version and public configuration
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_version="$(node -p "require('./apps/desktop/package.json').version")"
+          version="${base_version}-preview.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          node scripts/update-release-package-versions.ts "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Public T3 Connect identifiers (Clerk publishable key, relay URL).
+          cp .env.example .env
+
+      # Builds the server bundle plus the web client into apps/server/dist.
+      - name: Build server bundle
+        run: vp run --filter t3 build
+
+      - name: Build resource monitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path native/resource-monitor/Cargo.toml \
+            --target x86_64-unknown-linux-gnu
+          target_dir="$RUNNER_TEMP/cli-resource-monitor/linux-x64"
+          mkdir -p "$target_dir"
+          cp native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor "$target_dir/"
+
+      # Keep in step with the same step in release-desktop.yml.
+      - name: Build CLI single-executable
+        shell: bash
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - name: Build CLI archive
+        shell: bash
+        run: |
+          node scripts/build-cli-archive.ts \
+            --platform linux \
+            --arch x64 \
+            --version "${{ steps.version.outputs.version }}" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        shell: bash
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ steps.version.outputs.version }}"
+
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cli-linux-x64
+          path: release-cli/*
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build Windows x64 installer
+    needs: cli_linux
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
@@ -64,28 +163,31 @@ jobs:
           }
 
       - name: Set preview version and public configuration
-        id: version
         shell: bash
         run: |
           set -euo pipefail
-          base_version="$(node -p "require('./apps/desktop/package.json').version")"
-          version="${base_version}-preview.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
-          node scripts/update-release-package-versions.ts "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          node scripts/update-release-package-versions.ts "${{ needs.cli_linux.outputs.version }}"
           # Public T3 Connect identifiers (Clerk publishable key, relay URL).
           cp .env.example .env
+
+      - name: Download Linux CLI archive for WSL
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cli-linux-x64
+          path: wsl-runtime
 
       - name: Build installer
         shell: bash
         run: |
           vp run dist:desktop:artifact \
             --platform win --target nsis --arch x64 \
-            --build-version "${{ steps.version.outputs.version }}" \
+            --build-version "${{ needs.cli_linux.outputs.version }}" \
+            --wsl-runtime "$GITHUB_WORKSPACE"/wsl-runtime/t3-*-linux-x64.tar.gz \
             --verbose
 
       - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: T3-Code-${{ steps.version.outputs.version }}-windows-x64
+          name: T3-Code-${{ needs.cli_linux.outputs.version }}-windows-x64
           path: release/*.exe
           if-no-files-found: error
