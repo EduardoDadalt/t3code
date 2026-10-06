@@ -17,6 +17,7 @@ const baseState: ThreadActionMenuState = {
   canSnoozeNow: true,
   isRegeneratingTitle: false,
   isRunning: false,
+  canMoveToLocalCheckout: false,
   supports: {
     settlement: true,
     autoSettleOptOut: true,
@@ -221,6 +222,16 @@ describe("buildThreadActionMenuItems", () => {
       (item) => item.id === "archive",
     );
     expect(archiveItem?.disabled).toBe(true);
+  });
+
+  it("offers moving to the current checkout only for worktree threads, disabled while running", () => {
+    expect(ids(baseState)).not.toContain("move-to-local-checkout");
+    const move = buildThreadActionMenuItems({
+      ...baseState,
+      canMoveToLocalCheckout: true,
+      isRunning: true,
+    }).find((item) => item.id === "move-to-local-checkout");
+    expect(move?.disabled).toBe(true);
   });
 });
 

@@ -43,6 +43,18 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
+## Move a worktree thread to the current checkout
+
+To continue a worktree thread in the project's own folder, right-click it in the
+sidebar or open the thread menu in the chat header and choose **Move to current
+checkout**. On web and desktop, T3 Code checks out the worktree's branch in the
+project folder, brings over its uncommitted changes, and removes the worktree.
+Files ignored by Git, such as `.env`, are not moved.
+
+The move waits until the thread is idle. If the project folder has uncommitted
+changes, choose whether to commit, stash, or discard them first; nothing is
+overwritten without that choice.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

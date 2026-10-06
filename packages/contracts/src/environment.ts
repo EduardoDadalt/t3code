@@ -166,6 +166,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       threadSettlement: clients keep their local visited state against
       servers that lack this. */
   threadVisitedTracking: Schema.optionalKey(Schema.Boolean),
+  /** Server understands git.moveThreadToLocalCheckout. Absent on older
+      servers, so clients hide the action instead of sending it. */
+  threadMoveToLocalCheckout: Schema.optionalKey(Schema.Boolean),
   /** Server persists a pull request reference on thread.meta.update. */
   threadPullRequestLinking: Schema.optionalKey(Schema.Boolean),
   /** Server resolves message delivery and model-selection context and validates

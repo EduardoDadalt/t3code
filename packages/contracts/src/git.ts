@@ -174,6 +174,26 @@ export const GitPreparePullRequestThreadInput = Schema.Struct({
 });
 export type GitPreparePullRequestThreadInput = typeof GitPreparePullRequestThreadInput.Type;
 
+/**
+ * What to do with uncommitted changes already in the project's own checkout.
+ * Absent means the move refuses to touch a dirty checkout.
+ */
+export const GitLocalCheckoutChangesResolution = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("commit"),
+    message: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000)),
+  }),
+  Schema.Struct({ type: Schema.Literal("stash") }),
+  Schema.Struct({ type: Schema.Literal("discard") }),
+]);
+export type GitLocalCheckoutChangesResolution = typeof GitLocalCheckoutChangesResolution.Type;
+
+export const GitMoveThreadToLocalCheckoutInput = Schema.Struct({
+  threadId: ThreadId,
+  localChanges: Schema.optional(GitLocalCheckoutChangesResolution),
+});
+export type GitMoveThreadToLocalCheckoutInput = typeof GitMoveThreadToLocalCheckoutInput.Type;
+
 export const VcsRemoveWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
   path: TrimmedNonEmptyStringSchema,
@@ -321,6 +341,16 @@ export const GitPreparePullRequestThreadResult = Schema.Struct({
 });
 export type GitPreparePullRequestThreadResult = typeof GitPreparePullRequestThreadResult.Type;
 
+export const GitMoveThreadToLocalCheckoutResult = Schema.Struct({
+  /** Branch now checked out in the project's checkout; null when the worktree was detached. */
+  branch: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  /** The worktree the thread left. */
+  worktreePath: TrimmedNonEmptyStringSchema,
+  /** False when the move succeeded but the worktree directory could not be removed. */
+  worktreeRemoved: Schema.Boolean,
+});
+export type GitMoveThreadToLocalCheckoutResult = typeof GitMoveThreadToLocalCheckoutResult.Type;
+
 export const VcsSwitchRefResult = Schema.Struct({
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
 });
@@ -420,6 +450,56 @@ export class GitManagerError extends Schema.TaggedError<GitManagerError>()("GitM
 }) {
   override get message(): string {
     return `Git manager failed in ${this.operation}: ${this.detail}`;
+  }
+}
+
+export const GitMoveThreadToLocalCheckoutFailureReason = Schema.Literals([
+  "thread_unavailable",
+  "project_unavailable",
+  "not_in_worktree",
+  "thread_running",
+  "worktree_shared",
+  "local_changes",
+  "move_in_progress",
+  "snapshot_failed",
+  "thread_update_failed",
+]);
+export type GitMoveThreadToLocalCheckoutFailureReason =
+  typeof GitMoveThreadToLocalCheckoutFailureReason.Type;
+
+export class GitMoveThreadToLocalCheckoutError extends Schema.TaggedError<GitMoveThreadToLocalCheckoutError>()(
+  "GitMoveThreadToLocalCheckoutError",
+  {
+    threadId: ThreadId,
+    reason: GitMoveThreadToLocalCheckoutFailureReason,
+    /** Uncommitted entries found in the project checkout, for `local_changes`. */
+    changedFileCount: Schema.optional(NonNegativeInt),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "thread_unavailable":
+        return "Could not load the thread.";
+      case "project_unavailable":
+        return "Could not load the thread's project.";
+      case "not_in_worktree":
+        return "The thread is already working in the project's checkout.";
+      case "thread_running":
+        return "Wait for the thread to finish, or stop it, before moving it.";
+      case "worktree_shared":
+        return "Another thread still works in this worktree, so it cannot be moved.";
+      case "local_changes":
+        return `The project's checkout has ${this.changedFileCount ?? "some"} uncommitted change${
+          this.changedFileCount === 1 ? "" : "s"
+        }. Commit, stash, or discard them first.`;
+      case "move_in_progress":
+        return "This thread is already being moved.";
+      case "snapshot_failed":
+        return "Could not capture the worktree's changes. Nothing was moved.";
+      case "thread_update_failed":
+        return "Could not point the thread at the project's checkout. Nothing was moved.";
+    }
   }
 }
 

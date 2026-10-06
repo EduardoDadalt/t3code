@@ -114,6 +114,9 @@ import {
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
+  GitMoveThreadToLocalCheckoutError,
+  GitMoveThreadToLocalCheckoutInput,
+  GitMoveThreadToLocalCheckoutResult,
   VcsPullInput,
   GitPullRequestRefInput,
   VcsPullResult,
@@ -399,6 +402,7 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
+  gitMoveThreadToLocalCheckout: "git.moveThreadToLocalCheckout",
 
   // Review methods
   reviewGetDiffPreview: "review.getDiffPreview",
@@ -1289,6 +1293,16 @@ const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePullReque
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
 });
 
+const WsGitMoveThreadToLocalCheckoutRpc = Rpc.make(WS_METHODS.gitMoveThreadToLocalCheckout, {
+  payload: GitMoveThreadToLocalCheckoutInput,
+  success: GitMoveThreadToLocalCheckoutResult,
+  error: Schema.Union([
+    GitMoveThreadToLocalCheckoutError,
+    GitCommandError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
 const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
   payload: VcsListRefsInput,
   success: VcsListRefsResult,
@@ -1865,6 +1879,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
+  WsGitMoveThreadToLocalCheckoutRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,
   WsVcsRemoveWorktreeRpc,
