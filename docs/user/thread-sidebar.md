@@ -43,17 +43,24 @@ in a new thread's model picker to add or remove them. A regular click returns to
 single model. Choose a base branch and send. Each selection starts a separate thread
 and worktree while you stay in the new thread composer. This requires a Git project.
 
-## Move a worktree thread to the current checkout
+## Move a worktree thread to another worktree
 
-To continue a worktree thread in the project's own folder, right-click it in the
-sidebar or open the thread menu in the chat header and choose **Move to current
-checkout**. On web and desktop, T3 Code checks out the worktree's branch in the
-project folder, brings over its uncommitted changes, and removes the worktree.
-Files ignored by Git, such as `.env`, are not moved.
+To continue a worktree thread in the project's own folder or in another existing
+worktree, such as the one where your dev environment runs, right-click it in the
+sidebar or open the thread menu in the chat header and choose **Move to
+worktree…**. On web and desktop, T3 Code checks out the thread's branch in the
+worktree you pick, brings over its uncommitted changes, and keeps the
+conversation. If that worktree was on another branch, the confirmation says which
+one. Files ignored by Git, such as `.env`, are not moved.
 
-The move waits until the thread is idle. If the project folder has uncommitted
-changes, choose whether to commit, stash, or discard them first; nothing is
-overwritten without that choice.
+The worktree the thread leaves is removed when you move to the current checkout.
+Moving between worktrees keeps it, detached and without the moved changes; change
+the **Remove** option in the dialog to choose otherwise.
+
+The move waits until the thread is idle, including its background agents and
+commands, and until no other thread is running in the chosen worktree. If that
+worktree has uncommitted changes, the dialog lists them; choose whether to
+commit, stash, or discard them first. Nothing is overwritten without that choice.
 
 ## Pin and reorder threads
 

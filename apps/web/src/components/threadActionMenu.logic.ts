@@ -8,7 +8,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  */
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
-  | "move-to-local-checkout"
+  | "move-to-worktree"
   | "filter-by-project"
   | "project-settings"
   | "pin"
@@ -91,8 +91,8 @@ export interface ThreadActionMenuState {
   readonly isRegeneratingTitle: boolean;
   /** Archive rejects a thread with an attached provider, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
-  /** The thread works in a worktree and its server can move it to the project checkout. */
-  readonly canMoveToLocalCheckout: boolean;
+  /** The thread works in a worktree and its server can move it to another one. */
+  readonly canMoveToWorktree: boolean;
   readonly supports: {
     readonly settlement: boolean;
     /** Server understands thread.auto-settle.set. */
@@ -135,11 +135,11 @@ export function buildThreadActionMenuItems(
           },
         ]
       : []),
-    ...(state.canMoveToLocalCheckout
+    ...(state.canMoveToWorktree
       ? [
           {
-            id: "move-to-local-checkout" as const,
-            label: "Move to current checkout",
+            id: "move-to-worktree" as const,
+            label: "Move to worktree…",
             icon: "folder",
             disabled: state.isRunning,
           },

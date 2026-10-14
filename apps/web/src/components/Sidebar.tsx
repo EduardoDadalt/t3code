@@ -13,7 +13,7 @@ import {
 } from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
-import { moveThreadToLocalCheckout } from "./MoveToLocalCheckoutDialog";
+import { moveThreadToWorktree } from "./MoveToWorktreeDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
@@ -4650,9 +4650,10 @@ export default function Sidebar() {
         }
         const thread = threadByKeyRef.current.get(threadKey);
         if (!thread) return;
-        const threadProjectRoot =
-          projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ?? null;
-        const threadWorkspacePath = thread.worktreePath ?? threadProjectRoot;
+        const threadWorkspacePath =
+          thread.worktreePath ??
+          projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ??
+          null;
         // Un-settle pins the thread active until real activity clears the pin.
         // Environments without
         // the settlement capability get no lifecycle items at all.
@@ -4669,9 +4670,9 @@ export default function Sidebar() {
         const supportsTitleRegeneration =
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadTitleRegeneration === true;
-        const supportsMoveToLocalCheckout =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities
-            .threadMoveToLocalCheckout === true;
+        const supportsMoveToWorktree =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadMoveToWorktree ===
+          true;
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
@@ -4707,10 +4708,7 @@ export default function Sidebar() {
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
               isRunning: !threadRuntimeCanArchive(thread.runtime),
-              canMoveToLocalCheckout:
-                thread.worktreePath != null &&
-                threadProjectRoot !== null &&
-                supportsMoveToLocalCheckout,
+              canMoveToWorktree: thread.worktreePath != null && supportsMoveToWorktree,
               supports: {
                 settlement: supportsSettlement,
                 autoSettleOptOut: supportsAutoSettleOptOut,
@@ -4752,13 +4750,12 @@ export default function Sidebar() {
                 projectId: thread.projectId,
               });
             return;
-          case "move-to-local-checkout":
-            if (!thread.worktreePath || !threadProjectRoot) return;
-            await moveThreadToLocalCheckout({
+          case "move-to-worktree":
+            if (!thread.worktreePath) return;
+            await moveThreadToWorktree({
               environmentId: thread.environmentId,
               threadId: thread.id,
               threadTitle: thread.title,
-              projectRoot: threadProjectRoot,
               branch: thread.branch ?? null,
               worktreePath: thread.worktreePath,
             });

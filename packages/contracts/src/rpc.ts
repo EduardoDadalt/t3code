@@ -131,9 +131,11 @@ import {
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
-  GitMoveThreadToLocalCheckoutError,
-  GitMoveThreadToLocalCheckoutInput,
-  GitMoveThreadToLocalCheckoutResult,
+  GitListThreadMoveTargetsInput,
+  GitListThreadMoveTargetsResult,
+  GitMoveThreadToWorktreeError,
+  GitMoveThreadToWorktreeInput,
+  GitMoveThreadToWorktreeResult,
   VcsPullInput,
   GitPullRequestRefInput,
   VcsPullResult,
@@ -437,7 +439,8 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
-  gitMoveThreadToLocalCheckout: "git.moveThreadToLocalCheckout",
+  gitListThreadMoveTargets: "git.listThreadMoveTargets",
+  gitMoveThreadToWorktree: "git.moveThreadToWorktree",
 
   // Review methods
   reviewGetDiffPreview: "review.getDiffPreview",
@@ -1400,11 +1403,21 @@ const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePullReque
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
 });
 
-const WsGitMoveThreadToLocalCheckoutRpc = Rpc.make(WS_METHODS.gitMoveThreadToLocalCheckout, {
-  payload: GitMoveThreadToLocalCheckoutInput,
-  success: GitMoveThreadToLocalCheckoutResult,
+const WsGitListThreadMoveTargetsRpc = Rpc.make(WS_METHODS.gitListThreadMoveTargets, {
+  payload: GitListThreadMoveTargetsInput,
+  success: GitListThreadMoveTargetsResult,
   error: Schema.Union([
-    GitMoveThreadToLocalCheckoutError,
+    GitMoveThreadToWorktreeError,
+    GitCommandError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsGitMoveThreadToWorktreeRpc = Rpc.make(WS_METHODS.gitMoveThreadToWorktree, {
+  payload: GitMoveThreadToWorktreeInput,
+  success: GitMoveThreadToWorktreeResult,
+  error: Schema.Union([
+    GitMoveThreadToWorktreeError,
     GitCommandError,
     EnvironmentAuthorizationError,
   ]),
@@ -2024,7 +2037,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
-  WsGitMoveThreadToLocalCheckoutRpc,
+  WsGitListThreadMoveTargetsRpc,
+  WsGitMoveThreadToWorktreeRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,
   WsVcsRemoveWorktreeRpc,

@@ -5,11 +5,13 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import {
+  type GitMoveThreadToWorktreeInput,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
   type Project,
   ProjectId,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -29,8 +31,8 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as ThreadCheckoutService from "./ThreadCheckoutService.ts";
 
-const threadId = ThreadId.make("thread-move-to-local");
-const projectId = ProjectId.make("project-move-to-local");
+const threadId = ThreadId.make("thread-move-to-worktree");
+const projectId = ProjectId.make("project-move-to-worktree");
 
 const layerVcsProcess = VcsProcess.layer.pipe(Layer.provide(NodeServices.layer));
 const layerInfrastructure = Layer.mergeAll(
@@ -39,7 +41,9 @@ const layerInfrastructure = Layer.mergeAll(
     Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(layerVcsProcess))),
   ),
 ).pipe(
-  Layer.provide(ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix: "t3-move-local-" })),
+  Layer.provide(
+    ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix: "t3-move-worktree-" }),
+  ),
   Layer.provideMerge(layerVcsProcess),
   Layer.provideMerge(NodeCrypto.layer),
   Layer.provideMerge(NodeServices.layer),
@@ -68,14 +72,16 @@ const exists = (path: string) =>
   });
 
 /**
- * A project checkout on `main` and a worktree on `feature` holding one commit
- * plus uncommitted edits: a modification, a deletion, and a new file.
+ * A project checkout on `main`, a worktree on `feature` holding one commit
+ * plus uncommitted edits (a modification, a deletion, and a new file), and a
+ * second worktree on `docker`.
  */
 const setupRepository = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const tmp = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-move-local-" });
+  const tmp = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-move-worktree-" });
   const projectRoot = NodePath.join(tmp, "project");
   const worktreePath = NodePath.join(tmp, "worktree");
+  const otherWorktreePath = NodePath.join(tmp, "other");
   yield* fileSystem.makeDirectory(projectRoot);
   yield* git(projectRoot, ["init", "--quiet", "--initial-branch=main"]);
   yield* git(projectRoot, ["config", "user.email", "test@test.com"]);
@@ -91,7 +97,14 @@ const setupRepository = Effect.gen(function* () {
   yield* write(NodePath.join(worktreePath, "README.md"), "# project\nedited in worktree\n");
   yield* write(NodePath.join(worktreePath, "new.txt"), "brand new\n");
   yield* fileSystem.remove(NodePath.join(worktreePath, "obsolete.txt"));
-  return { projectRoot, worktreePath };
+  yield* git(projectRoot, ["worktree", "add", "--quiet", "-b", "docker", otherWorktreePath]);
+  // Paths as Git reports them, so comparisons survive a symlinked temp dir.
+  const real = (path: string) => fileSystem.realPath(path);
+  return {
+    projectRoot,
+    worktreePath: yield* real(worktreePath),
+    otherWorktreePath: yield* real(otherWorktreePath),
+  };
 });
 
 const serviceLayer = (input: {
@@ -99,6 +112,9 @@ const serviceLayer = (input: {
   readonly worktreePath: string;
   readonly dispatched: Array<OrchestrationV2ServerCommand>;
   readonly failDispatch?: boolean;
+  readonly runs?: ReadonlyArray<unknown>;
+  readonly turnItems?: ReadonlyArray<unknown>;
+  readonly otherThreads?: ReadonlyArray<Partial<OrchestrationV2ThreadShell>>;
 }) => {
   const thread = {
     id: threadId,
@@ -106,6 +122,8 @@ const serviceLayer = (input: {
     title: "Move me",
     branch: "feature",
     worktreePath: input.worktreePath,
+    activeProviderThreadId: null,
+    activeRunId: null,
     deletedAt: null,
   };
   return ThreadCheckoutService.layer.pipe(
@@ -113,9 +131,17 @@ const serviceLayer = (input: {
       Layer.mergeAll(
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: () =>
-            Effect.succeed({ thread, runs: [] } as unknown as OrchestrationV2ThreadProjection),
+            Effect.succeed({
+              thread,
+              runs: input.runs ?? [],
+              providerThreads: [],
+              turnItems: input.turnItems ?? [],
+            } as unknown as OrchestrationV2ThreadProjection),
           listProjectThreads: () =>
-            Effect.succeed([thread as unknown as OrchestrationV2ThreadShell]),
+            Effect.succeed([
+              thread,
+              ...(input.otherThreads ?? []),
+            ] as unknown as Array<OrchestrationV2ThreadShell>),
           dispatch: (command) => {
             if (input.failDispatch === true) {
               return Effect.fail(
@@ -144,19 +170,53 @@ const serviceLayer = (input: {
   );
 };
 
+const moveToWorktree = (input: Omit<GitMoveThreadToWorktreeInput, "threadId">) =>
+  Effect.gen(function* () {
+    const service = yield* ThreadCheckoutService.ThreadCheckoutService;
+    return yield* service.moveToWorktree({ threadId, ...input });
+  });
+
 it.layer(layerInfrastructure)("ThreadCheckoutService", (it) => {
-  describe("moveToLocalCheckout", () => {
+  describe("listMoveTargets", () => {
+    it.effect(
+      "lists the project's other worktrees, detached ones included, its own checkout first",
+      () =>
+        Effect.gen(function* () {
+          const { projectRoot, worktreePath, otherWorktreePath } = yield* setupRepository;
+          const detachedPath = NodePath.join(NodePath.dirname(otherWorktreePath), "detached");
+          yield* git(projectRoot, ["worktree", "add", "--quiet", "--detach", detachedPath]);
+
+          const result = yield* Effect.gen(function* () {
+            const service = yield* ThreadCheckoutService.ThreadCheckoutService;
+            return yield* service.listMoveTargets({ threadId });
+          }).pipe(Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched: [] })));
+
+          expect(result.targets).toEqual([
+            { path: projectRoot, branch: "main", isProjectRoot: true },
+            { path: detachedPath, branch: null, isProjectRoot: false },
+            { path: otherWorktreePath, branch: "docker", isProjectRoot: false },
+          ]);
+        }),
+    );
+  });
+
+  describe("moveToWorktree", () => {
     it.effect("moves the branch and uncommitted changes into the project checkout", () =>
       Effect.gen(function* () {
         const { projectRoot, worktreePath } = yield* setupRepository;
         const dispatched: Array<OrchestrationV2ServerCommand> = [];
 
-        const result = yield* Effect.gen(function* () {
-          const service = yield* ThreadCheckoutService.ThreadCheckoutService;
-          return yield* service.moveToLocalCheckout({ threadId });
+        const result = yield* moveToWorktree({
+          targetPath: projectRoot,
+          removeSourceWorktree: true,
         }).pipe(Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched })));
 
-        expect(result).toEqual({ branch: "feature", worktreePath, worktreeRemoved: true });
+        expect(result).toEqual({
+          branch: "feature",
+          previousBranch: "main",
+          sourceWorktreePath: worktreePath,
+          sourceWorktreeRemoved: true,
+        });
         expect(yield* git(projectRoot, ["branch", "--show-current"])).toBe("feature");
         expect(yield* read(NodePath.join(projectRoot, "committed.txt"))).toBe("on the branch\n");
         expect(yield* read(NodePath.join(projectRoot, "README.md"))).toBe(
@@ -178,45 +238,79 @@ it.layer(layerInfrastructure)("ThreadCheckoutService", (it) => {
             expectedWorktreePath: worktreePath,
           },
         ]);
-        expect(yield* git(projectRoot, ["for-each-ref", "refs/t3/local-checkout-moves"])).toBe("");
+        expect(yield* git(projectRoot, ["for-each-ref", "refs/t3/worktree-moves"])).toBe("");
       }),
     );
 
-    it.effect("refuses a dirty project checkout without touching either side", () =>
+    it.effect("moves into another worktree and keeps the source detached and clean", () =>
       Effect.gen(function* () {
-        const { projectRoot, worktreePath } = yield* setupRepository;
-        yield* write(NodePath.join(projectRoot, "README.md"), "# local edit\n");
+        const { projectRoot, worktreePath, otherWorktreePath } = yield* setupRepository;
         const dispatched: Array<OrchestrationV2ServerCommand> = [];
 
-        const error = yield* Effect.gen(function* () {
-          const service = yield* ThreadCheckoutService.ThreadCheckoutService;
-          return yield* service.moveToLocalCheckout({ threadId });
-        }).pipe(
-          Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched })),
-          Effect.flip,
-        );
+        const result = yield* moveToWorktree({
+          targetPath: otherWorktreePath,
+          removeSourceWorktree: false,
+        }).pipe(Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched })));
 
-        expect(error).toMatchObject({ reason: "local_changes", changedFileCount: 1 });
+        expect(result).toEqual({
+          branch: "feature",
+          previousBranch: "docker",
+          sourceWorktreePath: worktreePath,
+          sourceWorktreeRemoved: false,
+        });
+        expect(yield* git(otherWorktreePath, ["branch", "--show-current"])).toBe("feature");
+        expect(yield* git(otherWorktreePath, ["status", "--porcelain=v1"])).toBe(
+          [" M README.md", " D obsolete.txt", "?? new.txt"].join("\n"),
+        );
+        expect(yield* git(worktreePath, ["branch", "--show-current"])).toBe("");
+        expect(yield* git(worktreePath, ["status", "--porcelain=v1"])).toBe("");
         expect(yield* git(projectRoot, ["branch", "--show-current"])).toBe("main");
-        expect(yield* read(NodePath.join(projectRoot, "README.md"))).toBe("# local edit\n");
-        expect(yield* git(worktreePath, ["branch", "--show-current"])).toBe("feature");
-        expect(yield* read(NodePath.join(worktreePath, "new.txt"))).toBe("brand new\n");
-        expect(dispatched).toEqual([]);
+        expect(dispatched).toMatchObject([
+          { type: "thread.metadata.update", branch: "feature", worktreePath: otherWorktreePath },
+        ]);
       }),
     );
 
-    it.effect("stashes local changes when asked, then moves", () =>
+    it.effect(
+      "refuses a dirty target, naming its changed files, without touching either side",
+      () =>
+        Effect.gen(function* () {
+          const { projectRoot, worktreePath } = yield* setupRepository;
+          yield* write(NodePath.join(projectRoot, "README.md"), "# local edit\n");
+          const dispatched: Array<OrchestrationV2ServerCommand> = [];
+
+          const error = yield* moveToWorktree({
+            targetPath: projectRoot,
+            removeSourceWorktree: true,
+          }).pipe(
+            Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched })),
+            Effect.flip,
+          );
+
+          expect(error).toMatchObject({
+            reason: "target_changes",
+            changedFileCount: 1,
+            changedFiles: ["README.md"],
+          });
+          expect(error.message).toContain("README.md");
+          expect(yield* git(projectRoot, ["branch", "--show-current"])).toBe("main");
+          expect(yield* read(NodePath.join(projectRoot, "README.md"))).toBe("# local edit\n");
+          expect(yield* git(worktreePath, ["branch", "--show-current"])).toBe("feature");
+          expect(yield* read(NodePath.join(worktreePath, "new.txt"))).toBe("brand new\n");
+          expect(dispatched).toEqual([]);
+        }),
+    );
+
+    it.effect("stashes the target's changes when asked, then moves", () =>
       Effect.gen(function* () {
         const { projectRoot, worktreePath } = yield* setupRepository;
         yield* write(NodePath.join(projectRoot, "local.txt"), "keep me\n");
         const dispatched: Array<OrchestrationV2ServerCommand> = [];
 
-        yield* Effect.gen(function* () {
-          const service = yield* ThreadCheckoutService.ThreadCheckoutService;
-          return yield* service.moveToLocalCheckout({
-            threadId,
-            localChanges: { type: "stash" },
-          });
+        yield* moveToWorktree({
+          targetPath: projectRoot,
+          targetChanges: { type: "stash" },
+          removeSourceWorktree: true,
         }).pipe(Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched })));
 
         expect(yield* git(projectRoot, ["branch", "--show-current"])).toBe("feature");
@@ -228,14 +322,97 @@ it.layer(layerInfrastructure)("ThreadCheckoutService", (it) => {
       }),
     );
 
-    it.effect("rolls everything back when the thread cannot be re-pointed", () =>
+    it.effect("refuses while background agents or commands still run in the thread", () =>
       Effect.gen(function* () {
         const { projectRoot, worktreePath } = yield* setupRepository;
         const dispatched: Array<OrchestrationV2ServerCommand> = [];
 
-        const error = yield* Effect.gen(function* () {
-          const service = yield* ThreadCheckoutService.ThreadCheckoutService;
-          return yield* service.moveToLocalCheckout({ threadId });
+        const error = yield* moveToWorktree({
+          targetPath: projectRoot,
+          removeSourceWorktree: true,
+        }).pipe(
+          Effect.provide(
+            serviceLayer({
+              projectRoot,
+              worktreePath,
+              dispatched,
+              runs: [{ id: "run-1", ordinal: 1, status: "completed" }],
+              turnItems: [
+                {
+                  id: "item-1",
+                  type: "subagent",
+                  status: "running",
+                  title: "Explore",
+                  runId: "run-1",
+                },
+              ],
+            }),
+          ),
+          Effect.flip,
+        );
+
+        expect(error).toMatchObject({ reason: "background_work" });
+        expect(yield* git(worktreePath, ["branch", "--show-current"])).toBe("feature");
+        expect(dispatched).toEqual([]);
+      }),
+    );
+
+    it.effect("refuses a target another thread is running in", () =>
+      Effect.gen(function* () {
+        const { projectRoot, worktreePath, otherWorktreePath } = yield* setupRepository;
+        const dispatched: Array<OrchestrationV2ServerCommand> = [];
+
+        const error = yield* moveToWorktree({
+          targetPath: otherWorktreePath,
+          removeSourceWorktree: false,
+        }).pipe(
+          Effect.provide(
+            serviceLayer({
+              projectRoot,
+              worktreePath,
+              dispatched,
+              otherThreads: [
+                {
+                  id: ThreadId.make("thread-in-target"),
+                  worktreePath: otherWorktreePath,
+                  activeRunId: RunId.make("run-in-target"),
+                },
+              ],
+            }),
+          ),
+          Effect.flip,
+        );
+
+        expect(error).toMatchObject({ reason: "target_busy" });
+        expect(yield* git(otherWorktreePath, ["branch", "--show-current"])).toBe("docker");
+        expect(dispatched).toEqual([]);
+      }),
+    );
+
+    it.effect("refuses a target that is not one of the project's worktrees", () =>
+      Effect.gen(function* () {
+        const { projectRoot, worktreePath } = yield* setupRepository;
+
+        const error = yield* moveToWorktree({
+          targetPath: worktreePath,
+          removeSourceWorktree: false,
+        }).pipe(
+          Effect.provide(serviceLayer({ projectRoot, worktreePath, dispatched: [] })),
+          Effect.flip,
+        );
+
+        expect(error).toMatchObject({ reason: "target_unavailable" });
+      }),
+    );
+
+    it.effect("rolls everything back when the thread cannot be re-pointed", () =>
+      Effect.gen(function* () {
+        const { projectRoot, worktreePath, otherWorktreePath } = yield* setupRepository;
+        const dispatched: Array<OrchestrationV2ServerCommand> = [];
+
+        const error = yield* moveToWorktree({
+          targetPath: otherWorktreePath,
+          removeSourceWorktree: true,
         }).pipe(
           Effect.provide(
             serviceLayer({ projectRoot, worktreePath, dispatched, failDispatch: true }),
@@ -244,8 +421,8 @@ it.layer(layerInfrastructure)("ThreadCheckoutService", (it) => {
         );
 
         expect(error).toMatchObject({ reason: "thread_update_failed" });
-        expect(yield* git(projectRoot, ["branch", "--show-current"])).toBe("main");
-        expect(yield* git(projectRoot, ["status", "--porcelain=v1"])).toBe("");
+        expect(yield* git(otherWorktreePath, ["branch", "--show-current"])).toBe("docker");
+        expect(yield* git(otherWorktreePath, ["status", "--porcelain=v1"])).toBe("");
         expect(yield* git(worktreePath, ["branch", "--show-current"])).toBe("feature");
         expect(yield* git(worktreePath, ["status", "--porcelain=v1"])).toBe(
           [" M README.md", " D obsolete.txt", "?? new.txt"].join("\n"),

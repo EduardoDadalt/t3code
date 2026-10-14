@@ -1,6 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
-import { moveThreadToLocalCheckout } from "../components/MoveToLocalCheckoutDialog";
+import { moveThreadToWorktree } from "../components/MoveToWorktreeDialog";
 import {
   type AtomCommandResult,
   isAtomCommandInterrupted,
@@ -28,7 +28,7 @@ import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope } from "../state/session";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
-  readEnvironmentSupportsMoveToLocalCheckout,
+  readEnvironmentSupportsMoveToWorktree,
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
@@ -148,10 +148,6 @@ export function useThreadActionMenu(input: {
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
-        const threadProject = projects.find(
-          (candidate) =>
-            candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
-        );
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const items = buildThreadActionMenuItems({
           canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
@@ -164,10 +160,9 @@ export function useThreadActionMenu(input: {
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           isRunning: !threadRuntimeCanArchive(thread.runtime),
-          canMoveToLocalCheckout:
+          canMoveToWorktree:
             thread.worktreePath != null &&
-            threadProject !== undefined &&
-            readEnvironmentSupportsMoveToLocalCheckout(threadRef.environmentId),
+            readEnvironmentSupportsMoveToWorktree(threadRef.environmentId),
           supports,
           snoozePresets,
         });
@@ -207,7 +202,11 @@ export function useThreadActionMenu(input: {
         };
         switch (action) {
           case "project-settings": {
-            const project = threadProject;
+            const project = projects.find(
+              (candidate) =>
+                candidate.environmentId === thread.environmentId &&
+                candidate.id === thread.projectId,
+            );
             if (!project) return;
             const projectKey =
               logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
@@ -234,13 +233,12 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
-          case "move-to-local-checkout":
-            if (!thread.worktreePath || !threadProject) return;
-            await moveThreadToLocalCheckout({
+          case "move-to-worktree":
+            if (!thread.worktreePath) return;
+            await moveThreadToWorktree({
               environmentId: threadRef.environmentId,
               threadId: thread.id,
               threadTitle: thread.title,
-              projectRoot: threadProject.workspaceRoot,
               branch: thread.branch ?? null,
               worktreePath: thread.worktreePath,
             });

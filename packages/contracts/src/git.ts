@@ -173,11 +173,16 @@ export const GitPreparePullRequestThreadInput = Schema.Struct({
 });
 export type GitPreparePullRequestThreadInput = typeof GitPreparePullRequestThreadInput.Type;
 
+export const GitListThreadMoveTargetsInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type GitListThreadMoveTargetsInput = typeof GitListThreadMoveTargetsInput.Type;
+
 /**
- * What to do with uncommitted changes already in the project's own checkout.
- * Absent means the move refuses to touch a dirty checkout.
+ * What to do with uncommitted changes already in the target worktree.
+ * Absent means the move refuses to touch a dirty target.
  */
-export const GitLocalCheckoutChangesResolution = Schema.Union([
+export const GitWorktreeChangesResolution = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("commit"),
     message: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000)),
@@ -185,13 +190,17 @@ export const GitLocalCheckoutChangesResolution = Schema.Union([
   Schema.Struct({ type: Schema.Literal("stash") }),
   Schema.Struct({ type: Schema.Literal("discard") }),
 ]);
-export type GitLocalCheckoutChangesResolution = typeof GitLocalCheckoutChangesResolution.Type;
+export type GitWorktreeChangesResolution = typeof GitWorktreeChangesResolution.Type;
 
-export const GitMoveThreadToLocalCheckoutInput = Schema.Struct({
+export const GitMoveThreadToWorktreeInput = Schema.Struct({
   threadId: ThreadId,
-  localChanges: Schema.optional(GitLocalCheckoutChangesResolution),
+  /** One of the paths `git.listThreadMoveTargets` returned. */
+  targetPath: TrimmedNonEmptyStringSchema,
+  targetChanges: Schema.optional(GitWorktreeChangesResolution),
+  /** Remove the worktree the thread leaves; otherwise it stays, detached and clean. */
+  removeSourceWorktree: Schema.Boolean,
 });
-export type GitMoveThreadToLocalCheckoutInput = typeof GitMoveThreadToLocalCheckoutInput.Type;
+export type GitMoveThreadToWorktreeInput = typeof GitMoveThreadToWorktreeInput.Type;
 
 export const VcsRemoveWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
@@ -340,15 +349,32 @@ export const GitPreparePullRequestThreadResult = Schema.Struct({
 });
 export type GitPreparePullRequestThreadResult = typeof GitPreparePullRequestThreadResult.Type;
 
-export const GitMoveThreadToLocalCheckoutResult = Schema.Struct({
-  /** Branch now checked out in the project's checkout; null when the worktree was detached. */
+export const GitThreadMoveTarget = Schema.Struct({
+  path: TrimmedNonEmptyStringSchema,
+  /** Null when the worktree is on a detached commit. */
   branch: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
-  /** The worktree the thread left. */
-  worktreePath: TrimmedNonEmptyStringSchema,
-  /** False when the move succeeded but the worktree directory could not be removed. */
-  worktreeRemoved: Schema.Boolean,
+  /** The project's own checkout rather than a linked worktree. */
+  isProjectRoot: Schema.Boolean,
 });
-export type GitMoveThreadToLocalCheckoutResult = typeof GitMoveThreadToLocalCheckoutResult.Type;
+export type GitThreadMoveTarget = typeof GitThreadMoveTarget.Type;
+
+export const GitListThreadMoveTargetsResult = Schema.Struct({
+  /** The project's other worktrees, the project's own checkout first. */
+  targets: Schema.Array(GitThreadMoveTarget),
+});
+export type GitListThreadMoveTargetsResult = typeof GitListThreadMoveTargetsResult.Type;
+
+export const GitMoveThreadToWorktreeResult = Schema.Struct({
+  /** Branch now checked out in the target; null when the thread's worktree was detached. */
+  branch: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  /** Branch the target was on before the move; null when it was detached. */
+  previousBranch: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
+  /** The worktree the thread left. */
+  sourceWorktreePath: TrimmedNonEmptyStringSchema,
+  /** False when removal was not asked for, or the directory could not be removed. */
+  sourceWorktreeRemoved: Schema.Boolean,
+});
+export type GitMoveThreadToWorktreeResult = typeof GitMoveThreadToWorktreeResult.Type;
 
 export const VcsSwitchRefResult = Schema.Struct({
   refName: Schema.NullOr(TrimmedNonEmptyStringSchema),
@@ -452,27 +478,33 @@ export class GitManagerError extends Schema.TaggedError<GitManagerError>()("GitM
   }
 }
 
-export const GitMoveThreadToLocalCheckoutFailureReason = Schema.Literals([
+export const GitMoveThreadToWorktreeFailureReason = Schema.Literals([
   "thread_unavailable",
   "project_unavailable",
   "not_in_worktree",
+  "target_unavailable",
   "thread_running",
+  "background_work",
   "worktree_shared",
-  "local_changes",
+  "target_busy",
+  "target_changes",
   "move_in_progress",
   "snapshot_failed",
   "thread_update_failed",
 ]);
-export type GitMoveThreadToLocalCheckoutFailureReason =
-  typeof GitMoveThreadToLocalCheckoutFailureReason.Type;
+export type GitMoveThreadToWorktreeFailureReason = typeof GitMoveThreadToWorktreeFailureReason.Type;
 
-export class GitMoveThreadToLocalCheckoutError extends Schema.TaggedError<GitMoveThreadToLocalCheckoutError>()(
-  "GitMoveThreadToLocalCheckoutError",
+const LISTED_CHANGED_FILES = 5;
+
+export class GitMoveThreadToWorktreeError extends Schema.TaggedError<GitMoveThreadToWorktreeError>()(
+  "GitMoveThreadToWorktreeError",
   {
     threadId: ThreadId,
-    reason: GitMoveThreadToLocalCheckoutFailureReason,
-    /** Uncommitted entries found in the project checkout, for `local_changes`. */
+    reason: GitMoveThreadToWorktreeFailureReason,
+    /** Uncommitted entries found in the target, for `target_changes`. */
     changedFileCount: Schema.optional(NonNegativeInt),
+    /** Some of those entries' paths, for `target_changes`. */
+    changedFiles: Schema.optional(Schema.Array(Schema.String)),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -483,21 +515,35 @@ export class GitMoveThreadToLocalCheckoutError extends Schema.TaggedError<GitMov
       case "project_unavailable":
         return "Could not load the thread's project.";
       case "not_in_worktree":
-        return "The thread is already working in the project's checkout.";
+        return "Only a thread that works in a worktree can be moved.";
+      case "target_unavailable":
+        return "Choose one of the project's other worktrees.";
       case "thread_running":
         return "Wait for the thread to finish, or stop it, before moving it.";
+      case "background_work":
+        return "Background agents or commands are still running in this thread, and moving it would end them. Wait for them to finish, or press Stop, then move it.";
       case "worktree_shared":
         return "Another thread still works in this worktree, so it cannot be moved.";
-      case "local_changes":
-        return `The project's checkout has ${this.changedFileCount ?? "some"} uncommitted change${
-          this.changedFileCount === 1 ? "" : "s"
-        }. Commit, stash, or discard them first.`;
+      case "target_busy":
+        return "Another thread is working in the target worktree. Wait for it to finish, or stop it, before moving here.";
+      case "target_changes": {
+        const count = this.changedFileCount ?? this.changedFiles?.length;
+        const listed = (this.changedFiles ?? []).slice(0, LISTED_CHANGED_FILES);
+        const more = count === undefined ? 0 : count - listed.length;
+        const files =
+          listed.length === 0
+            ? ""
+            : `: ${listed.join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+        return `The target worktree has ${count ?? "some"} uncommitted change${
+          count === 1 ? "" : "s"
+        }${files}. Commit, stash, or discard them first.`;
+      }
       case "move_in_progress":
         return "This thread is already being moved.";
       case "snapshot_failed":
         return "Could not capture the worktree's changes. Nothing was moved.";
       case "thread_update_failed":
-        return "Could not point the thread at the project's checkout. Nothing was moved.";
+        return "Could not point the thread at the target worktree. Nothing was moved.";
     }
   }
 }

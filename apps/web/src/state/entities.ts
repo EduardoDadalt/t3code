@@ -245,10 +245,10 @@ export function readEnvironmentSupportsTitleRegeneration(environmentId: Environm
   );
 }
 
-export function readEnvironmentSupportsMoveToLocalCheckout(environmentId: EnvironmentId): boolean {
+export function readEnvironmentSupportsMoveToWorktree(environmentId: EnvironmentId): boolean {
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
-      .threadMoveToLocalCheckout === true
+      .threadMoveToWorktree === true
   );
 }
 

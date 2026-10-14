@@ -2881,8 +2881,8 @@ const layerWsRpc = (
           gitWorkflow
             .preparePullRequestThread(input)
             .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
-        [WS_METHODS.gitMoveThreadToLocalCheckout]: (input) =>
-          threadCheckout.moveToLocalCheckout(input),
+        [WS_METHODS.gitListThreadMoveTargets]: (input) => threadCheckout.listMoveTargets(input),
+        [WS_METHODS.gitMoveThreadToWorktree]: (input) => threadCheckout.moveToWorktree(input),
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),

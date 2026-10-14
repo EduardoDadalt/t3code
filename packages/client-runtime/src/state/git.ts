@@ -19,10 +19,14 @@ export function createGitEnvironmentAtoms<R, E>(
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
     }),
+    threadMoveTargets: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:list-thread-move-targets",
+      tag: WS_METHODS.gitListThreadMoveTargets,
+    }),
     // The server serializes moves per thread; the input carries no cwd to schedule on.
-    moveThreadToLocalCheckout: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:git:move-thread-to-local-checkout",
-      tag: WS_METHODS.gitMoveThreadToLocalCheckout,
+    moveThreadToWorktree: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:git:move-thread-to-worktree",
+      tag: WS_METHODS.gitMoveThreadToWorktree,
     }),
   };
 }

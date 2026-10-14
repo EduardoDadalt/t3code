@@ -19,7 +19,7 @@ import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
-import { MoveToLocalCheckoutDialogHost } from "../components/MoveToLocalCheckoutDialog";
+import { MoveToWorktreeDialogHost } from "../components/MoveToWorktreeDialog";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { KeybindingsConfigWarning } from "../components/KeybindingsConfigWarning";
 import { FirstRunGate } from "../components/onboarding/FirstRunGate";
@@ -200,7 +200,7 @@ function RootRouteView() {
           <FontAppearanceSync />
           <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
-          <MoveToLocalCheckoutDialogHost />
+          <MoveToWorktreeDialogHost />
           <CommandPalette>
             <AppSidebarLayout>
               <Outlet />
@@ -258,7 +258,7 @@ function RootRouteView() {
           <ReopenClosedViewShortcut />
           <ConfirmDialogHost />
           <CustomSnoozeDialogHost />
-          <MoveToLocalCheckoutDialogHost />
+          <MoveToWorktreeDialogHost />
           <SlowRpcRequestToastCoordinator />
           <PermissionUpdateNotice />
           {primaryEnvironmentAuthenticated ? <LegacyThreadMigrationToast /> : null}
