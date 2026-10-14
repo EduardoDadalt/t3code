@@ -184,7 +184,7 @@ const make = Effect.gen(function* () {
     const localBranch = yield* currentBranch(projectRoot);
     const localHead = yield* runGit("localHead", projectRoot, ["rev-parse", "--verify", "HEAD"]);
     const commandId = CommandId.make(
-      `server:move-to-local-checkout:${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}`,
+      `server:move-to-local-checkout:${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
     );
 
     // Each step undoes the ones before it if anything after it fails.
