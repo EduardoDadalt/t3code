@@ -85,8 +85,6 @@ jobs:
       # Keep in step with the same step in release-desktop.yml.
       - name: Build CLI single-executable
         shell: bash
-        env:
-          VP_NODE_VERSION: "26.8.2"
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
       - name: Build CLI archive

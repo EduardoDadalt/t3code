@@ -17,7 +17,6 @@ import {
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import { describe, expect } from "vite-plus/test";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -158,9 +157,7 @@ const serviceLayer = (input: {
         } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
         Layer.mock(ProjectService.ProjectService)({
           getById: () =>
-            Effect.succeed(
-              Option.some({ id: projectId, workspaceRoot: input.projectRoot } as Project),
-            ),
+            Effect.succeedSome({ id: projectId, workspaceRoot: input.projectRoot } as Project),
         }),
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           refreshStatus: () => Effect.never,

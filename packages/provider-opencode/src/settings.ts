@@ -1,11 +1,10 @@
-/**
- * Shared by the server driver and the client settings form, so it holds only
- * browser-safe schema code.
- */
+// Shared with the client settings form; keep schema code browser-safe.
 import {
   CustomModelSetting,
   makeBinaryPathSetting,
   makeProviderSettingsSchema,
+  secretSetting,
+  SettingsSecretValue,
   TrimmedString,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -38,11 +37,12 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
-    serverPassword: TrimmedString.pipe(
+    serverPassword: SettingsSecretValue.pipe(
+      secretSetting,
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Server password",
-        description: "Stored in plain text on disk.",
+        description: "Stored separately on the host.",
         providerSettingsForm: {
           control: "password",
           placeholder: "Optional",

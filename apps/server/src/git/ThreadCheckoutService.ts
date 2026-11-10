@@ -13,7 +13,7 @@ import {
 } from "@t3tools/contracts";
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as FileSystem from "effect/FileSystem";
@@ -40,11 +40,9 @@ export class ThreadCheckoutService extends Context.Service<
       GitMoveThreadToWorktreeError | GitCommandError
     >;
     /**
-     * Moves a worktree thread into another worktree of its project, the
-     * project's own checkout included: the target switches to the thread's
-     * branch, receives the worktree's uncommitted changes, and the thread is
-     * re-pointed at it. The worktree it leaves is removed or kept detached and
-     * clean. Refuses a dirty target unless `targetChanges` says how to clear it.
+     * The target switches to the thread's branch and receives the worktree's
+     * uncommitted changes; the source is removed or left detached and clean.
+     * A dirty target is refused unless `targetChanges` says how to clear it.
      */
     readonly moveToWorktree: (
       input: GitMoveThreadToWorktreeInput,
@@ -56,7 +54,7 @@ export class ThreadCheckoutService extends Context.Service<
 >()("t3/git/ThreadCheckoutService") {}
 
 const make = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const fileSystem = yield* FileSystem.FileSystem;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
@@ -205,7 +203,7 @@ const make = Effect.gen(function* () {
       return yield* fail("thread_running");
     }
     // Re-pointing the thread detaches its provider session, which ends the
-    // background agents and commands still running inside it (#16000).
+    // background agents and commands still running inside it.
     if (
       derivePendingBackgroundWork({
         latestRun: records.runs.findLast((run) => run.status !== "queued"),
@@ -307,7 +305,7 @@ const make = Effect.gen(function* () {
     const previousBranch = yield* currentBranch(targetPath);
     const targetHead = yield* runGit("targetHead", targetPath, ["rev-parse", "--verify", "HEAD"]);
     const commandId = CommandId.make(
-      `server:move-to-worktree:${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
+      `server:move-to-worktree:${yield* random.uuidV4().pipe(Effect.orDie)}`,
     );
 
     // Each step undoes the ones before it if anything after it fails.

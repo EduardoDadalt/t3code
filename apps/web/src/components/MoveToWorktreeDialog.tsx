@@ -102,6 +102,7 @@ function finish(outcome: MoveToWorktreeOutcome | null) {
 
 export function MoveToWorktreeDialogHost() {
   const request = useRequest((state) => state.request);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- resolves any pending move request promise with null when the dialog host unmounts
   useEffect(() => () => finish(null), []);
   return request ? <MoveToWorktreeDialog key={request.threadId} request={request} /> : null;
 }

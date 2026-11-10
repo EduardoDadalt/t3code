@@ -1,11 +1,13 @@
 import { groupBy } from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import type {
+  ModelSelection,
+  OrchestrationV2AppThread,
   OrchestrationV2Subagent,
   OrchestrationV2SubagentWorkflow,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
-import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
+import { isOrchestrationV2WorkActive, isProviderNativeSubagentThread } from "@t3tools/contracts";
 
 export type RuntimeSubagentStatus =
   | "pending"
@@ -51,6 +53,7 @@ export interface RuntimeSubagent {
   readonly role: string | null;
   readonly model: string | null;
   readonly effort: string | null;
+  readonly speed?: string | undefined;
   readonly status: RuntimeSubagentStatus;
   readonly activationCount: number;
   readonly usage: SubagentUsage | null;
@@ -138,9 +141,10 @@ function workflowMembersToRuntime(
     const failed = status === "failed";
     const startedAt = isoFromEpochMillis(agent.startedAt);
     const completedAt = isTerminalSubagentStatus(status)
-      ? agent.startedAt !== undefined && agent.durationMs !== undefined
-        ? isoFromEpochMillis(agent.startedAt + agent.durationMs)
-        : coordinator.completedAt
+      ? (isoFromEpochMillis(agent.completedAt) ??
+        (agent.startedAt !== undefined && agent.durationMs !== undefined
+          ? isoFromEpochMillis(agent.startedAt + agent.durationMs)
+          : coordinator.completedAt))
       : null;
     return {
       ...coordinator,
@@ -148,6 +152,8 @@ function workflowMembersToRuntime(
       kind: "workflow_agent" as const,
       title: agent.label,
       model: agent.model ?? null,
+      effort: agent.effort ?? null,
+      ...(agent.speed === undefined ? {} : { speed: agent.speed }),
       status,
       activationCount: agent.attempt ?? 1,
       usage: workflowUsage(agent),
@@ -168,6 +174,32 @@ function workflowMembersToRuntime(
       updatedAt: completedAt ?? startedAt ?? coordinator.firstSeenAt,
     } satisfies RuntimeSubagent;
   });
+}
+
+function promptTitle(prompt: string): string {
+  if (prompt.length <= 80) return prompt;
+  let end = 77;
+  const previous = prompt.charCodeAt(end - 1);
+  const next = prompt.charCodeAt(end);
+  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+    end -= 1;
+  }
+  return `${prompt.slice(0, end)}...`;
+}
+
+export function workflowMemberModelSelection(
+  member: Pick<RuntimeSubagent, "model" | "effort" | "speed">,
+  instanceId: ModelSelection["instanceId"],
+): ModelSelection | undefined {
+  if (!member.model) return undefined;
+  return {
+    instanceId,
+    model: member.model,
+    options: [
+      ...(member.effort ? [{ id: "effort", value: member.effort }] : []),
+      ...(member.speed ? [{ id: "fastMode", value: member.speed === "fast" }] : []),
+    ],
+  };
 }
 
 export function projectedSubagentsToRuntime(
@@ -195,9 +227,7 @@ export function projectedSubagentsToRuntime(
     const coordinator = {
       id: subagent.id,
       kind: workflow === undefined ? "subagent" : "workflow",
-      title:
-        subagent.title ??
-        (subagent.prompt.length > 80 ? `${subagent.prompt.slice(0, 77)}...` : subagent.prompt),
+      title: subagent.title ?? promptTitle(subagent.prompt),
       role: null,
       model: subagent.model,
       effort: null,
@@ -288,4 +318,133 @@ export function deriveWorkflowGroups(
 
     return { workflow, phases, unphasedMembers };
   });
+}
+
+// Workflow scripts open with their `meta` export, after any leading comments.
+const WORKFLOW_SCRIPT_START = /^\s*(?:(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*)*export\s+const\s+meta\b/;
+
+/**
+ * Whether a user message is the script a provider-native workflow runs. Servers mark every
+ * subagent prompt either way; only threads recorded before the mark fall back to the text.
+ */
+export function isWorkflowScriptMessage(message: {
+  readonly role: string;
+  readonly text: string;
+  readonly workflowScript?: boolean | undefined;
+}): boolean {
+  return (
+    message.role === "user" && (message.workflowScript ?? WORKFLOW_SCRIPT_START.test(message.text))
+  );
+}
+
+type ProjectedSubagent = Parameters<typeof projectedSubagentsToRuntime>[0][number] &
+  Pick<OrchestrationV2Subagent, "driver" | "providerInstanceId">;
+
+export interface WorkflowOpening {
+  readonly messageId: string;
+  readonly script: string;
+  readonly name: string | null;
+  readonly description: string | null;
+  readonly driver: OrchestrationV2Subagent["driver"] | null;
+  readonly providerInstanceId: OrchestrationV2Subagent["providerInstanceId"] | null;
+  /** Null until the parent thread's coordinator row is loaded. */
+  readonly group: SubagentWorkflowGroup | null;
+}
+
+/**
+ * The opening of a workflow coordinator's thread: its first user message is the workflow script,
+ * shown as the workflow's plan. The coordinator row lives on the parent thread, so
+ * `parentSubagents` is the parent projection's subagents, or null when it is not loaded.
+ */
+export function resolveWorkflowOpening(input: {
+  readonly thread: Pick<OrchestrationV2AppThread, "id" | "lineage" | "creationSource">;
+  readonly messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly text: string;
+    readonly workflowScript?: boolean | undefined;
+  }>;
+  readonly parentSubagents: ReadonlyArray<ProjectedSubagent> | null;
+}): WorkflowOpening | null {
+  if (!isProviderNativeSubagentThread(input.thread)) return null;
+  const first = input.messages.find((message) => message.role === "user");
+  if (first === undefined) return null;
+  const coordinator = input.parentSubagents?.find(
+    (subagent) => subagent.childThreadId === input.thread.id,
+  );
+  if (first.workflowScript === false) return null;
+  if (coordinator?.workflow === undefined && !isWorkflowScriptMessage(first)) return null;
+  return {
+    messageId: first.id,
+    script: first.text,
+    name: coordinator?.workflow?.name ?? null,
+    description: coordinator?.title ?? null,
+    driver: coordinator?.driver ?? null,
+    providerInstanceId: coordinator?.providerInstanceId ?? null,
+    group:
+      coordinator?.workflow === undefined
+        ? null
+        : (deriveWorkflowGroups(projectedSubagentsToRuntime([coordinator]))[0] ?? null),
+  };
+}
+
+/**
+ * The parent thread whose subagent rows describe this thread's workflow, or null when the thread
+ * does not open with a workflow script. Gates loading the parent so ordinary subagent threads
+ * never subscribe to their parent's detail.
+ */
+export function workflowOpeningParentThreadId(input: {
+  readonly thread: Pick<OrchestrationV2AppThread, "lineage" | "creationSource">;
+  readonly messages: ReadonlyArray<Parameters<typeof isWorkflowScriptMessage>[0]>;
+}): OrchestrationV2AppThread["id"] | null {
+  if (!isProviderNativeSubagentThread(input.thread)) return null;
+  const first = input.messages.find((message) => message.role === "user");
+  return first !== undefined && isWorkflowScriptMessage(first)
+    ? input.thread.lineage.parentThreadId
+    : null;
+}
+
+/** The opening block's heading: the workflow, what it does, and how its agents stand. */
+export function workflowOpeningHeadline(opening: WorkflowOpening): {
+  readonly title: string;
+  readonly description: string | null;
+  readonly agents: string | null;
+} {
+  const title = opening.name ?? opening.description ?? "Workflow";
+  const members =
+    opening.group === null
+      ? []
+      : [
+          ...opening.group.phases.flatMap((phase) => phase.members),
+          ...opening.group.unphasedMembers,
+        ];
+  const counts = new Map<string, number>();
+  for (const member of members) {
+    const key = isTerminalSubagentStatus(member.status)
+      ? member.status === "completed"
+        ? "done"
+        : member.status === "failed"
+          ? "failed"
+          : "stopped"
+      : "working";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const agents =
+    members.length === 0
+      ? null
+      : `${members.length} ${members.length === 1 ? "agent" : "agents"} · ${[
+          "working",
+          "done",
+          "failed",
+          "stopped",
+        ]
+          .filter((key) => counts.has(key))
+          .map((key) => `${counts.get(key)} ${key}`)
+          .join(" · ")}`;
+  return {
+    title,
+    description:
+      opening.description !== null && opening.description !== title ? opening.description : null,
+    agents,
+  };
 }
