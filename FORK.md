@@ -50,10 +50,10 @@ Not supported: mobile (no menu entry) and MCP tools for agents.
 ## 2. Unsigned Windows installer CI
 
 `.github/workflows/fork-windows-installer.yml` builds an unsigned Windows desktop
-installer from `main`. A first job builds the Linux x64 CLI archive, and the
-Windows job embeds it with `--wsl-runtime` (as upstream `release-desktop.yml`
-does), so the WSL backend starts instead of hanging on "Connecting to WSL…".
-Keep its build steps in step with `release-desktop.yml` after each upstream merge.
+installer from `main` (artifact of the workflow run). It embeds no Linux CLI
+archive (`--wsl-runtime`), so the installer has no WSL backend: the fork only
+uses the Windows backend. Keep its build steps in step with upstream
+`release-desktop.yml` after each upstream merge.
 
 ## Merging upstream
 
