@@ -55,6 +55,14 @@ archive (`--wsl-runtime`), so the installer has no WSL backend: the fork only
 uses the Windows backend. Keep its build steps in step with upstream
 `release-desktop.yml` after each upstream merge.
 
+## 3. Native Windows builds pass the payload file budget
+
+Upstream cross-builds Windows releases on Linux, which skips the prepared server
+bytecode (`resources/server-compile-cache`, ~20 files). The fork builds natively
+on Windows, where that cache pushed the payload over
+`WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT`. `countPayloadFiles` in
+`scripts/build-desktop-artifact.ts` leaves that directory out of the budget.
+
 ## Merging upstream
 
 - Merge stable tags (`vX.Y.Z`, no `-nightly`/`-preview` suffix), e.g.

@@ -3184,9 +3184,16 @@ function collectUnpackedAsarFiles(
   return output;
 }
 
+// Only native builds prepare server bytecode, so it would push native Windows builds
+// over a budget that cross-built releases meet.
+const PAYLOAD_FILE_BUDGET_EXCLUDED_DIRS = ["resources/server-compile-cache"];
+
 const countPayloadFiles = Effect.fn("desktopArtifact.countPayloadFiles")(function* (root: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const excludedDirectories = new Set(
+    PAYLOAD_FILE_BUDGET_EXCLUDED_DIRS.map((directory) => path.join(root, directory)),
+  );
   const pendingDirectories = [root];
   let count = 0;
 
@@ -3198,7 +3205,7 @@ const countPayloadFiles = Effect.fn("desktopArtifact.countPayloadFiles")(functio
       const entryPath = path.join(directory, entry);
       const stat = yield* fs.stat(entryPath);
       if (stat.type === "Directory") {
-        pendingDirectories.push(entryPath);
+        if (!excludedDirectories.has(entryPath)) pendingDirectories.push(entryPath);
       } else if (stat.type === "File") {
         count += 1;
       }

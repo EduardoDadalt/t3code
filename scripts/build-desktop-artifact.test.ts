@@ -1342,6 +1342,35 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it.effect("keeps prepared server bytecode out of the file-count budget", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+        const input = {
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+        } as const;
+        const baseline = yield* validateWindowsPackagedPayload({ ...input, fileLimit: 0 }).pipe(
+          Effect.flip,
+        );
+        assert.instanceOf(baseline, WindowsPackagedPayloadValidationError);
+        const fileLimit = baseline.fileCount ?? 0;
+        const cacheDir = path.join(fixture.packagedAppDir, "resources/server-compile-cache");
+        yield* fs.makeDirectory(cacheDir, { recursive: true });
+        for (const name of ["manifest.json", "05831047", "163953b4"]) {
+          yield* fs.writeFileString(path.join(cacheDir, name), "cache");
+        }
+
+        const result = yield* validateWindowsPackagedPayload({ ...input, fileLimit });
+        assert.equal(result.fileCount, fileLimit);
+      }),
+    ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
   it.effect("rejects a sidecar whose extracted server bundle cannot resolve", () =>
     Effect.scoped(
       Effect.gen(function* () {
