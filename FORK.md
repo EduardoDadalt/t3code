@@ -4,8 +4,8 @@ This repository is a fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3c
 (`upstream` remote). It tracks upstream stable releases and carries the few
 changes below. Everything not listed here behaves exactly like upstream.
 
-- Current upstream base: stable tag `v0.1.8`, merged into `main`.
-- To see the full fork delta: `git diff v0.1.8 -- . ':!FORK.md'` (or
+- Current upstream base: stable tag `v0.1.9`, merged into `main`.
+- To see the full fork delta: `git diff v0.1.9 -- . ':!FORK.md'` (or
   `git log --no-merges <upstream-tag>..main`).
 - Keep this file current when a fork-only change is added, removed, or upstreamed.
 
