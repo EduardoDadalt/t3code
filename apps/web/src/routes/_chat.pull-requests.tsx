@@ -50,6 +50,9 @@ export const Route = createFileRoute("/_chat/pull-requests")({
       ? { environmentId: raw.environmentId as EnvironmentId }
       : {}),
     ...(typeof raw.host === "string" && raw.host ? { host: raw.host.slice(0, 200) } : {}),
+    ...(typeof raw.owner === "string" && raw.owner.trim()
+      ? { owner: raw.owner.trim().slice(0, 200) }
+      : {}),
     ...(typeof raw.selectedProjectId === "string" && raw.selectedProjectId
       ? { selectedProjectId: raw.selectedProjectId as ProjectId }
       : {}),

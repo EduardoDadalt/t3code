@@ -1,3 +1,4 @@
+import { pullRequestRepositoryHasOwner } from "@t3tools/client-runtime/pull-request-project-filter";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 
 import { resolvePullRequestAuthorFilter } from "@t3tools/contracts";
@@ -243,13 +244,16 @@ export function narrowPullRequestsToFilters<Entry extends PullRequestListEntry>(
     readonly state: PullRequestListState;
     readonly projectId: string | undefined;
     readonly host: string | undefined;
+    readonly owner: string | undefined;
   },
 ): ReadonlyArray<Entry> {
+  const { owner } = filters;
   return entries.filter(
     (entry) =>
       (filters.state === "all" || entry.state === filters.state) &&
       (filters.projectId === undefined || entry.projectId === filters.projectId) &&
-      (filters.host === undefined || entry.host === filters.host),
+      (filters.host === undefined || entry.host === filters.host) &&
+      (owner === undefined || pullRequestRepositoryHasOwner(entry.repository, owner)),
   );
 }
 

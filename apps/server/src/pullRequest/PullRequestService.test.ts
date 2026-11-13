@@ -66,6 +66,7 @@ function project(input: {
             },
             provider: SourceControlProviderKind.make(input.provider ?? "github"),
             displayName: input.repository,
+            owner: input.repository.split("/")[0]!,
           },
         }
       : {}),
@@ -320,7 +321,7 @@ const sshAliasHost = {
 } as SourceControlProvider["Service"];
 
 function makeService(input: {
-  readonly settings?: ServerSettings;
+  readonly settings?: ServerSettings | (() => ServerSettings);
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly providers: ReadonlyArray<PullRequestProviderApi>;
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
@@ -332,7 +333,11 @@ function makeService(input: {
     Layer.build(
       Layer.mergeAll(
         Layer.mock(ServerSettingsService.ServerSettingsService)({
-          getSettings: Effect.succeed(input.settings ?? DEFAULT_SERVER_SETTINGS),
+          getSettings: Effect.sync(() =>
+            typeof input.settings === "function"
+              ? input.settings()
+              : (input.settings ?? DEFAULT_SERVER_SETTINGS),
+          ),
         }),
         Layer.succeed(
           PullRequestProviderRegistry.PullRequestProviderRegistry,
@@ -2353,6 +2358,64 @@ it.effect("a listing narrowed to some projects is its own cache entry", () =>
     yield* service.list({ state: "open", projectIds: ["p2" as ProjectId] });
     assert.strictEqual(asked.length, 2);
   }),
+);
+
+it.effect(
+  "a project with pull request listing off stays out until a listing scopes to it or its owner",
+  () =>
+    Effect.gen(function* () {
+      const asked: ReadonlyArray<string>[] = [];
+      let settings: ServerSettings = {
+        ...DEFAULT_SERVER_SETTINGS,
+        projectSettingsOverrides: { ["p2" as ProjectId]: { listPullRequests: false } },
+      };
+      const service = yield* makeService({
+        settings: () => settings,
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+          project({
+            id: "p2",
+            title: "upstream",
+            workspaceRoot: "/b",
+            repository: "upstream/t3code",
+          }),
+        ],
+        providers: [
+          fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+            listChangeRequestsAcross: (input) => {
+              asked.push(input.repositories);
+              return Effect.succeed({
+                items: input.repositories.map((repository, index) =>
+                  batchedChangeRequest(index + 1, repository, "2026-07-02T00:00:00Z"),
+                ),
+                truncated: false,
+              });
+            },
+          }),
+        ],
+      });
+
+      yield* service.list({ state: "open" });
+      yield* service.list({ state: "open", projectIds: ["p1" as ProjectId, "p2" as ProjectId] });
+      const scoped = yield* service.list({ state: "open", projectId: "p2" as ProjectId });
+      const owned = yield* service.list({ state: "open", owner: "Upstream" });
+      yield* service.list({ state: "open", owner: "acme" });
+      settings = DEFAULT_SERVER_SETTINGS;
+      yield* service.list({ state: "open" });
+
+      assert.deepStrictEqual(asked, [
+        ["acme/web"],
+        ["acme/web"],
+        ["upstream/t3code"],
+        ["upstream/t3code"],
+        ["acme/web"],
+        ["acme/web", "upstream/t3code"],
+      ]);
+      assert.deepStrictEqual(
+        [scoped, owned].map((result) => result.entries.map((entry) => entry.repository)),
+        [["upstream/t3code"], ["upstream/t3code"]],
+      );
+    }),
 );
 
 it.effect(

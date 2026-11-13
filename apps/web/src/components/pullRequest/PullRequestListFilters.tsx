@@ -9,6 +9,7 @@ import type {
   SourceControlProviderKind,
 } from "@t3tools/contracts";
 import {
+  BuildingIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   CircleSlashIcon,
@@ -136,6 +137,7 @@ export function PullRequestSearchInput({
 
 const ALL_PROJECTS_VALUE = "all";
 const ALL_HOSTS_VALUE = "";
+const ALL_OWNERS_VALUE = "";
 const ALL_SERVERS_VALUE = "";
 const UNFILTERED_VALUE = "all";
 /** Project ids are unique only within an environment. */
@@ -482,6 +484,9 @@ export function PullRequestFiltersMenu({
   host,
   hostOptions,
   onHost,
+  owner,
+  ownerOptions,
+  onOwner,
   server,
   serverOptions,
   onServer,
@@ -506,6 +511,9 @@ export function PullRequestFiltersMenu({
   host: string | undefined;
   hostOptions: ReadonlyArray<PullRequestFilterOption<string>>;
   onHost: (host: string | undefined) => void;
+  owner: string | undefined;
+  ownerOptions: ReadonlyArray<string>;
+  onOwner: (owner: string | undefined) => void;
   server: EnvironmentId | undefined;
   serverOptions: ReadonlyArray<PullRequestFilterOption<string>>;
   onServer: (server: EnvironmentId | undefined) => void;
@@ -520,6 +528,7 @@ export function PullRequestFiltersMenu({
     state !== "open",
     involvement !== "all",
     host,
+    owner,
     server,
     projectId,
     filters.draft,
@@ -538,6 +547,15 @@ export function PullRequestFiltersMenu({
     updateFilters({
       [key]: value === UNFILTERED_VALUE ? undefined : value,
     } as Partial<PullRequestListFilters>);
+  // A remembered owner no project carries any more stays listed so it can be cleared.
+  const selectedOwner =
+    owner === undefined
+      ? undefined
+      : (ownerOptions.find((option) => option.toLowerCase() === owner.toLowerCase()) ?? owner);
+  const owners =
+    selectedOwner === undefined || ownerOptions.includes(selectedOwner)
+      ? ownerOptions
+      : [selectedOwner, ...ownerOptions];
   const projectValue =
     projectId === undefined || projectEnvironmentId === undefined
       ? ALL_PROJECTS_VALUE
@@ -644,6 +662,17 @@ export function PullRequestFiltersMenu({
           </>
         ) : null}
         <MenuSeparator />
+        {ownerOptions.length > 1 || owner !== undefined ? (
+          <PullRequestFilterRadioSubmenu
+            label="Organization"
+            value={selectedOwner ?? ALL_OWNERS_VALUE}
+            options={[
+              { value: ALL_OWNERS_VALUE, label: "All organizations", Icon: LayersIcon },
+              ...owners.map((value) => ({ value, label: value, Icon: BuildingIcon })),
+            ]}
+            onChange={(next) => onOwner(next === ALL_OWNERS_VALUE ? undefined : next)}
+          />
+        ) : null}
         <PullRequestFilterRadioSubmenu
           label="Project"
           value={projectValue}

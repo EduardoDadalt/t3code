@@ -108,6 +108,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedAgentCredits = useScopedSettingsMixed(["removeAgentCreditsOnMerge"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+  const mixedListPullRequests = useScopedSettingsMixed(["listPullRequests"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
   const unavailable = connectedEnvironments.length === 0;
@@ -514,6 +515,34 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                   <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
                 </SelectPopup>
               </Select>
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["listPullRequests"]}
+            mixed={mixedListPullRequests}
+            {...searchableSetting("list-pull-requests")}
+            description={
+              isProjectScope
+                ? "Off keeps this project's pull requests off the Pull requests page until you pick the project in its project filter."
+                : "Off keeps projects' pull requests off the Pull requests page until you pick a project in its project filter. Projects can override it."
+            }
+            resetAction={
+              settings.listPullRequests ? null : (
+                <SettingResetButton
+                  label="pull request listing"
+                  tooltip="List pull requests again"
+                  onClick={() => updateSettings({ listPullRequests: true })}
+                />
+              )
+            }
+            control={
+              <Switch
+                aria-label="List pull requests"
+                mixed={mixedListPullRequests}
+                checked={mixedListPullRequests ? false : settings.listPullRequests}
+                onCheckedChange={(enabled) => updateSettings({ listPullRequests: enabled })}
+              />
             }
           />
         </>

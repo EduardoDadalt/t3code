@@ -1,3 +1,4 @@
+import { pullRequestOwnerOptions } from "@t3tools/client-runtime/pull-request-project-filter";
 import { usePaneRole } from "../../components/ui/Pane";
 import { Button } from "../../components/ui/Button";
 import {
@@ -247,6 +248,12 @@ export function PullRequestsScreen(
     labels: knownFacets.environmentId === environmentId ? knownFacets.labels : facets.labels,
     labelColors,
     projects,
+    owners: pullRequestOwnerOptions(
+      allProjects.filter(
+        (project) =>
+          !project.isScratch && (environmentId === null || project.environmentId === environmentId),
+      ),
+    ),
     onSearch: (kind) =>
       navigation.navigate("PullRequestFilterSearch", {
         kind,

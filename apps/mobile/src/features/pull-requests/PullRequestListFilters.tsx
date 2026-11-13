@@ -103,6 +103,7 @@ export function usePullRequestListFilters(props: {
   /** Dot colors by lowercased label name, for the labels that have one. */
   readonly labelColors: Readonly<Record<string, string>>;
   readonly projects: readonly { id: string; title: string; environmentId: string }[];
+  readonly owners: readonly string[];
   /** Opens a picker that searches the host, for a label or author no loaded row carries. */
   readonly onSearch: (kind: "labels" | "authors") => void;
 }) {
@@ -157,6 +158,9 @@ export function usePullRequestListFilters(props: {
         });
         break;
       }
+      case "owner":
+        props.onChange({ ...value, owner: next || undefined });
+        break;
       case "label": {
         const labels = selectedLabels.includes(next)
           ? selectedLabels.filter((label) => label !== next)
@@ -219,7 +223,8 @@ export function usePullRequestListFilters(props: {
     Number(Boolean(value.filters.draft)) +
     Number(Boolean(value.filters.review)) +
     Number(Boolean(value.filters.checks)) +
-    Number(Boolean(value.projectId));
+    Number(Boolean(value.projectId)) +
+    Number(Boolean(value.owner));
   const more: MenuProps["actions"] = [
     {
       id: "drafts",
@@ -236,6 +241,24 @@ export function usePullRequestListFilters(props: {
       title: value.filters.checks ? `${CHECKS[value.filters.checks]} checks` : "Checks",
       subactions: choices("checks", CHECKS, value.filters.checks ?? "all"),
     },
+    ...(props.owners.length > 1 || value.owner
+      ? [
+          {
+            id: "owners",
+            title: value.owner ?? "Organization",
+            subactions: choices(
+              "owner",
+              Object.fromEntries([
+                ["", "All organizations"],
+                ...[...new Set([...(value.owner ? [value.owner] : []), ...props.owners])].map(
+                  (owner) => [owner, owner],
+                ),
+              ]),
+              value.owner ?? "",
+            ),
+          },
+        ]
+      : []),
     {
       id: "projects",
       title:

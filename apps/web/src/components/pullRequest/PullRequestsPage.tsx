@@ -47,6 +47,7 @@ import {
   comparePullRequestsByRecency,
   largestPullRequestReadCount,
 } from "./pullRequestList.logic";
+import { pullRequestOwnerOptions } from "@t3tools/client-runtime/pull-request-project-filter";
 import {
   pullRequestListPreferences,
   type PullRequestListPreferencePatch,
@@ -223,6 +224,7 @@ export function PullRequestsPage() {
           ...(next.projectId ? { projectId: next.projectId } : {}),
           ...(next.environmentId ? { environmentId: next.environmentId } : {}),
           ...(next.host ? { host: next.host } : {}),
+          ...(next.owner ? { owner: next.owner } : {}),
           ...(next.selectedHost ? { selectedHost: next.selectedHost } : {}),
           ...(next.selectedProjectId ? { selectedProjectId: next.selectedProjectId } : {}),
           ...(next.selectedEnvironmentId
@@ -278,7 +280,7 @@ export function PullRequestsPage() {
   const turnRefreshToken = turnRefreshes
     .map(([environmentId, revision]) => `${environmentId}:${revision}`)
     .join("|");
-  const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
+  const scopeKey = `${environmentKey}:${assignmentKey}:${search.state}:${search.involvement}:${scopedProjectId ?? ""}:${search.host ?? ""}:${search.owner ?? ""}:${search.draft ?? ""}:${search.review ?? ""}:${search.checks ?? ""}:${search.author ?? ""}:${search.labels?.join("\u0000") ?? ""}`;
   const filterKey = `${scopeKey}:${sentQuery}`;
   const statsScope: PullRequestStatsScope = { key: filterKey, policy: statsPolicy };
   const [page, setPage] = useState<{
@@ -323,6 +325,7 @@ export function PullRequestsPage() {
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
+          ...(search.owner ? { owner: search.owner } : {}),
           ...(hasFilters ? { filters } : {}),
           ...(sentParsed.text ? { query: sentParsed.text } : {}),
           ...(cursors === undefined ? {} : { cursors }),
@@ -346,6 +349,7 @@ export function PullRequestsPage() {
       ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
       ...(projectIds ? { projectIds } : {}),
       ...(search.host ? { host: search.host } : {}),
+      ...(search.owner ? { owner: search.owner } : {}),
       ...(menuFiltered ? { filters: menuFilters } : {}),
     } satisfies PullRequestListInput,
   }));
@@ -366,6 +370,7 @@ export function PullRequestsPage() {
         ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
         ...(search.host ? { host: search.host } : {}),
+        ...(search.owner ? { owner: search.owner } : {}),
       } satisfies PullRequestListInput,
     }));
   })();
@@ -376,6 +381,7 @@ export function PullRequestsPage() {
       ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
       ...(projectIds ? { projectIds } : {}),
       ...(search.host ? { host: search.host } : {}),
+      ...(search.owner ? { owner: search.owner } : {}),
     },
   }));
   const partitionsWanted = search.involvement === "all" && typedQuery.length === 0;
@@ -400,6 +406,7 @@ export function PullRequestsPage() {
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
+          ...(search.owner ? { owner: search.owner } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,
       }));
@@ -537,6 +544,7 @@ export function PullRequestsPage() {
       state: search.state,
       projectId: scopedProjectId,
       host: search.host,
+      owner: search.owner,
     });
     return entries.length === 0 ? null : { ...loaded.data, entries };
   })();
@@ -1181,7 +1189,8 @@ export function PullRequestsPage() {
             search.state !== "open" ||
             search.involvement !== "all" ||
             scopedProjectId !== undefined ||
-            search.host !== undefined
+            search.host !== undefined ||
+            search.owner !== undefined
           }
           searching={typedQuery.length > 0 && (!querySettled || showingCarried)}
           canLoadMore={listData?.truncated === true && (canContinue || pageSize < MAX_PAGE_SIZE)}
@@ -1307,6 +1316,9 @@ export function PullRequestsPage() {
       host={search.host}
       hostOptions={hostMenuOptions}
       onHost={(host) => updateListScope({ host })}
+      owner={search.owner}
+      ownerOptions={pullRequestOwnerOptions(projects)}
+      onOwner={(owner) => updateListScope({ owner })}
       server={scopedEnvironmentId ?? undefined}
       serverOptions={serverMenuOptions}
       onServer={(server) => updateListScope({ environmentId: server, projectId: undefined })}

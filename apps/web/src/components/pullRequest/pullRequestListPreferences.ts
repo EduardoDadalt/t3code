@@ -25,6 +25,7 @@ export interface PullRequestListPreferences {
   readonly environmentId?: EnvironmentId;
   readonly projectId?: ProjectId;
   readonly host?: string;
+  readonly owner?: string;
   readonly q?: string | undefined;
   readonly draft?: "only" | "hide";
   readonly review?: NonNullable<PullRequestListFilters["review"]>;
@@ -50,6 +51,7 @@ const PullRequestListPreferencesSchema = Schema.Struct({
   environmentId: Schema.optional(EnvironmentId),
   projectId: Schema.optional(ProjectId),
   host: Schema.optional(BoundedPreference),
+  owner: Schema.optional(BoundedPreference),
   q: Schema.optional(BoundedPreference),
   draft: PullRequestListFilters.fields.draft,
   review: PullRequestListFilters.fields.review,
@@ -80,6 +82,7 @@ export function pullRequestListPreferences(
     ...(search.environmentId ? { environmentId: search.environmentId } : {}),
     ...(search.projectId ? { projectId: search.projectId } : {}),
     ...(search.host ? { host: search.host } : {}),
+    ...(search.owner ? { owner: search.owner } : {}),
     ...(search.q ? { q: search.q } : {}),
     ...(search.draft ? { draft: search.draft } : {}),
     ...(search.review ? { review: search.review } : {}),

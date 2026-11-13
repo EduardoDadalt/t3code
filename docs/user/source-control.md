@@ -301,6 +301,18 @@ and their marks follow the same rules as on web and desktop.
 - **A review cannot load:** open it on the host website while resolving connectivity, permissions,
   or rate limits.
 
+## Hide a project's pull requests
+
+The Pull requests page lists every project's open pull requests. A fork with an `upstream` remote
+lists the upstream repository's, which can be hundreds you never touch. To leave a project out,
+choose the project in Settings → Source control and turn off **List pull requests**. Its pull
+requests still appear when you pick the project in the page's project filter, and linked pull
+requests stay on their threads. Turning it off for all projects and back on for some lists only those.
+
+To see one organization's pull requests, open **Filters** → **Organization** on the Pull requests
+page. The organization is the repository owner: a GitHub organization or user, or a GitLab top-level
+group. Choosing one also lists its projects that have **List pull requests** turned off.
+
 ## Linked pull requests
 
 A thread can hold several pull requests, including reviews from another repository on the same host.

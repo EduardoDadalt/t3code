@@ -63,6 +63,40 @@ on Windows, where that cache pushed the payload over
 `WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT`. `countPayloadFiles` in
 `scripts/build-desktop-artifact.ts` leaves that directory out of the budget.
 
+## 4. Hide a project's pull requests from the Pull requests page
+
+A fork's `upstream` remote makes the Pull requests page list every upstream PR.
+The fork adds a project-scoped server setting, `listPullRequests` (default on),
+shown as **List pull requests** in Settings → Source control on web, desktop and
+mobile. Off leaves the project out of combined listings and filter options; a
+listing scoped to that project (`projectId`, the page's project filter) still
+lists it. Thread-linked PRs are unaffected.
+
+| Layer     | Fork code                                                                                                           |
+| --------- | ------------------------------------------------------------------------------------------------------------------- |
+| Contracts | `listPullRequests` in `packages/contracts/src/settings.ts` (keys list, `ProjectSettingsOverrides`, settings, patch) |
+| Server    | `listedUnder` / `combinedListingSettings` in `apps/server/src/pullRequest/PullRequestService.ts` (+ `.test.ts`)     |
+| Web       | row in `apps/web/src/components/settings/ProjectDefaultsSettings.tsx`, entry in `settingsSearch.ts`                 |
+| Mobile    | switch in `apps/mobile/src/features/settings/SettingsServerControlsRouteScreen.tsx`                                 |
+| Docs      | "Hide a project's pull requests" in `docs/user/source-control.md`                                                   |
+
+## 5. Filter the Pull requests page by organization
+
+Upstream filters the Pull requests page by host, server, and project only. The
+fork adds an **Organization** filter (the repository owner from
+`RepositoryIdentity.owner`: GitHub organization or user, GitLab top-level group)
+on web, desktop and mobile. It is the `owner` field of `PullRequestListInput` /
+`PullRequestFilterOptionsInput`, filtered on the server. Like `projectId`, it is
+an explicit scope, so it also lists projects with `listPullRequests` off.
+
+| Layer          | Fork code                                                                                                                                                 |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contracts      | `PullRequestRepositoryOwner`, `owner` in `packages/contracts/src/pullRequest.ts`                                                                          |
+| Server         | `owner` in `WorkspaceProjectFilter`, the list cache key, and `combinedListingSettings` in `PullRequestService.ts`                                         |
+| Client runtime | `pullRequestOwnerOptions`, `pullRequestRepositoryHasOwner` in `packages/client-runtime/src/pullRequestProjectFilter.ts`                                   |
+| Web            | `owner` search param (`routes/_chat.pull-requests.tsx`, `pullRequestListPreferences.ts`, `PullRequestsPage.tsx`), submenu in `PullRequestListFilters.tsx` |
+| Mobile         | `owner` in `PullRequestListControls` (`persistence/mobile-preferences.ts`), `pullRequestList.ts`, `PullRequestListFilters.tsx`, `PullRequestsScreen.tsx`  |
+
 ## Merging upstream
 
 - Merge stable tags (`vX.Y.Z`, no `-nightly`/`-preview` suffix), e.g.
@@ -72,5 +106,6 @@ on Windows, where that cache pushed the payload over
   `state/entities.ts`, `server.ts`, `RpcAuthorization.ts`, `clientRpcPermissions.ts`.
   Prefer taking the upstream version and re-adding the fork lines listed above.
 - After merging, typecheck `apps/server`, `apps/web`, `packages/contracts`, and run
-  `apps/server/src/git/ThreadCheckoutService.test.ts` and
-  `apps/web/src/components/threadActionMenu.logic.test.ts`.
+  `apps/server/src/git/ThreadCheckoutService.test.ts`,
+  `apps/web/src/components/threadActionMenu.logic.test.ts`, and
+  `apps/server/src/pullRequest/PullRequestService.test.ts -t "listing off"`.

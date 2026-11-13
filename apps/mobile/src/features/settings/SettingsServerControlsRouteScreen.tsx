@@ -62,7 +62,7 @@ const PAGE_PROJECT_KEYS: Record<SettingsPage, readonly ProjectScopedServerSettin
     "sidebarAutoSettleOnMerge",
     "sidebarAutoSettleAfterDays",
   ],
-  "source-control": ["defaultAutoPull", "removeAgentCreditsOnMerge"],
+  "source-control": ["defaultAutoPull", "removeAgentCreditsOnMerge", "listPullRequests"],
   worktrees: [
     "newWorktreesStartFromOrigin",
     "worktreeSubmodules",
@@ -417,6 +417,17 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     value={uniform("removeAgentCreditsOnMerge")}
                     disabled={disabledFor("removeAgentCreditsOnMerge")}
                     onValueChange={(value) => write({ removeAgentCreditsOnMerge: value })}
+                  />
+                  <SettingsSwitchRow
+                    icon={PullRequestGlyph.pullRequest}
+                    label="List pull requests"
+                    subtitle={managedSubtitle(
+                      "listPullRequests",
+                      "Off keeps pull requests off the Pull requests list until you pick the project in its filter.",
+                    )}
+                    value={uniform("listPullRequests")}
+                    disabled={disabledFor("listPullRequests")}
+                    onValueChange={(value) => write({ listPullRequests: value })}
                   />
                 </SettingsSection>
                 <SettingsSection title="Default branch">

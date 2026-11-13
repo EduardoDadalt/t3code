@@ -50,3 +50,26 @@ export function pullRequestFilterProjects<Project extends FilterProject>(
     left.title.localeCompare(right.title),
   );
 }
+
+/** The repository owners (organizations, users, top-level groups) across projects, once each. */
+export function pullRequestOwnerOptions(
+  projects: ReadonlyArray<{
+    readonly repositoryIdentity?: { readonly owner?: string | undefined } | null | undefined;
+  }>,
+): ReadonlyArray<string> {
+  const owners = new Map<string, string>();
+  for (const project of projects) {
+    const owner = project.repositoryIdentity?.owner;
+    if (owner !== undefined && !owners.has(owner.toLowerCase())) {
+      owners.set(owner.toLowerCase(), owner);
+    }
+  }
+  return [...owners.values()].sort((left, right) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" }),
+  );
+}
+
+/** Whether a listed `owner/name` repository belongs to the chosen owner. */
+export function pullRequestRepositoryHasOwner(repository: string, owner: string): boolean {
+  return repository.split("/", 1)[0]?.toLowerCase() === owner.toLowerCase();
+}

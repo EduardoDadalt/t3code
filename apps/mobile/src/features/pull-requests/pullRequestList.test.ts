@@ -244,6 +244,18 @@ describe("all-environment PR list", () => {
 });
 
 describe("mobile PR scan and filters", () => {
+  it("keeps the chosen organization's rows whatever its case", () => {
+    const rows = [entry(1), entry(2, { repository: "organization/repo" })];
+    expect(
+      filterPullRequestList(
+        rows,
+        { ...DEFAULT_PR_LIST_CONTROLS, owner: "ORG" },
+        {},
+        "",
+        new Set(),
+      ).map((row) => row.number),
+    ).toEqual([1]);
+  });
   it("resolves authored and author:me per host rather than mixing account identities", () => {
     const rows = [entry(1), entry(2, { host: "enterprise.test" })];
     const viewers = { "github.com": "Octocat", "enterprise.test": "someone-else" };

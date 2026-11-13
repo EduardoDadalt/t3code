@@ -1,4 +1,7 @@
-import { pullRequestFilterProjects } from "@t3tools/client-runtime/pull-request-project-filter";
+import {
+  pullRequestFilterProjects,
+  pullRequestRepositoryHasOwner,
+} from "@t3tools/client-runtime/pull-request-project-filter";
 import { parsePullRequestQuery } from "@t3tools/client-runtime/pull-request-query";
 import {
   ProjectId,
@@ -310,6 +313,7 @@ export function pullRequestListInput(
     filters: { ...controls.filters, ...parsed.filters },
     limit: PR_LIST_PAGE_SIZE,
     ...(controls.projectId ? { projectId: ProjectId.make(controls.projectId) } : {}),
+    ...(controls.owner ? { owner: controls.owner } : {}),
     ...(parsed.text ? { query: parsed.text } : {}),
   };
 }
@@ -414,6 +418,8 @@ export function filterPullRequestList<
     if (controls.state !== "all" && entry.state !== controls.state) return false;
     if (controls.projectId && entry.projectId !== controls.projectId) return false;
     if (controls.projectEnvironmentId && entry.environmentId !== controls.projectEnvironmentId)
+      return false;
+    if (controls.owner && !pullRequestRepositoryHasOwner(entry.repository, controls.owner))
       return false;
     const viewerKey = entry.environmentId ? `${entry.environmentId} ${entry.host}` : entry.host;
     const viewer = viewers[viewerKey];

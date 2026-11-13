@@ -371,6 +371,9 @@ export const PullRequestListCursors = Schema.Record(
 );
 export type PullRequestListCursors = typeof PullRequestListCursors.Type;
 
+/** A repository owner: the organization, user, or top-level group before the repository name. */
+export const PullRequestRepositoryOwner = TrimmedNonEmptyString.check(Schema.isMaxLength(200));
+
 export const PullRequestListInput = Schema.Struct({
   state: PullRequestListState,
   involvement: Schema.optional(PullRequestInvolvement),
@@ -378,6 +381,8 @@ export const PullRequestListInput = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
   host: Schema.optional(TrimmedNonEmptyString),
+  /** Like `projectId`, an explicit scope: it lists projects whose `listPullRequests` is off. */
+  owner: Schema.optional(PullRequestRepositoryOwner),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))),
   cursors: Schema.optional(PullRequestListCursors),
   query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -559,6 +564,7 @@ export const PullRequestFilterOptionsInput = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
   host: Schema.optional(TrimmedNonEmptyString),
+  owner: Schema.optional(PullRequestRepositoryOwner),
   query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
   /** For `references`, the sigil typed, so a host can search only what it links. */
   sigil: Schema.optional(PullRequestReferenceSigil),

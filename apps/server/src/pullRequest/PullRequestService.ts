@@ -75,6 +75,7 @@ import {
   type SourceControlProviderInfo,
   SourceControlProviderKind,
   type ThreadPullRequestKey,
+  type ServerSettings as ServerSettingsSnapshot,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
@@ -335,6 +336,26 @@ export interface SupportedProject {
   /** Unlike Azure repository names, remotes are unique across an organization. */
   readonly remote: string;
   readonly repositoryKey: string | null;
+}
+
+interface WorkspaceProjectFilter extends Pick<
+  PullRequestListInput,
+  "projectId" | "projectIds" | "host" | "owner"
+> {
+  /** Leaves out projects whose `listPullRequests` setting resolves off under these settings. */
+  readonly listedUnder?: ServerSettingsSnapshot;
+}
+
+/** What decides which projects a combined listing leaves out, so a settings change misses the cache. */
+function pullRequestListingKey(settings: ServerSettingsSnapshot) {
+  return [
+    settings.listPullRequests,
+    Object.entries(settings.projectSettingsOverrides)
+      .flatMap(([projectId, entry]) =>
+        entry.listPullRequests === undefined ? [] : [[projectId, entry.listPullRequests] as const],
+      )
+      .toSorted(([left], [right]) => left.localeCompare(right)),
+  ];
 }
 
 interface WorkspaceProjects {
@@ -862,11 +883,17 @@ export const make = Effect.gen(function* () {
   });
 
   const listWorkspaceProjects = (
-    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
+    filter: WorkspaceProjectFilter,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     Effect.flatMap(sharedProjectReads, (shared) => {
       if (shared === null || !shared.open) return readWorkspaceProjects(filter);
-      const key = JSON.stringify([filter.projectId, filter.projectIds, filter.host]);
+      const key = JSON.stringify([
+        filter.projectId,
+        filter.projectIds,
+        filter.host,
+        filter.owner?.toLowerCase(),
+        filter.listedUnder === undefined ? null : pullRequestListingKey(filter.listedUnder),
+      ]);
       const existing = shared.reads.get(key);
       if (existing !== undefined) return existing;
       return Effect.cached(readWorkspaceProjects(filter)).pipe(
@@ -889,8 +916,26 @@ export const make = Effect.gen(function* () {
       );
     });
 
+  // Choosing a project or an owner lists its projects even when they stay out of combined listings.
+  const combinedListingSettings = (input: {
+    readonly projectId?: ProjectId | undefined;
+    readonly owner?: string | undefined;
+  }): Effect.Effect<ServerSettingsSnapshot | undefined, PullRequestError> =>
+    input.projectId !== undefined || input.owner !== undefined
+      ? Effect.undefined
+      : serverSettings.getSettings.pipe(
+          Effect.mapError(
+            (cause) =>
+              new PullRequestOperationError({
+                operation: "listProjects",
+                detail: "The pull request list settings could not be read.",
+                cause,
+              }),
+          ),
+        );
+
   const readWorkspaceProjects = (
-    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
+    filter: WorkspaceProjectFilter,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     (filter.projectId === undefined
       ? projects.listShells(
@@ -934,7 +979,19 @@ export const make = Effect.gen(function* () {
         for (const project of projects) {
           if (filter.projectId !== undefined && project.id !== filter.projectId) continue;
           if (filter.projectIds !== undefined && !filter.projectIds.includes(project.id)) continue;
+          if (
+            filter.listedUnder !== undefined &&
+            !resolveProjectSettings(filter.listedUnder, project.id).settings.listPullRequests
+          ) {
+            continue;
+          }
           const identity = project.repositoryIdentity;
+          if (
+            filter.owner !== undefined &&
+            identity?.owner?.toLowerCase() !== filter.owner.toLowerCase()
+          ) {
+            continue;
+          }
           let kind = identity?.provider;
           const repository = sourceControlDefinitions.repositorySelector(
             project.repositoryIdentity,
@@ -1307,7 +1364,12 @@ export const make = Effect.gen(function* () {
     const involvement = input.involvement ?? "all";
     const epochAtStart = epochCounter;
     const continuation = yield* decodeCursors(input.cursors);
-    const { supported: projects, unimplemented, viewerRoots } = yield* listWorkspaceProjects(input);
+    const listedUnder = yield* combinedListingSettings(input);
+    const {
+      supported: projects,
+      unimplemented,
+      viewerRoots,
+    } = yield* listWorkspaceProjects(listedUnder === undefined ? input : { ...input, listedUnder });
     const projectCounts = new Map<string, number>();
     for (const { host } of projects) {
       projectCounts.set(host, (projectCounts.get(host) ?? 0) + 1);
@@ -2577,7 +2639,10 @@ export const make = Effect.gen(function* () {
   const filterOptions: PullRequestService["Service"]["filterOptions"] = Effect.fn(
     "PullRequestService.filterOptions",
   )(function* (input) {
-    const { supported } = yield* listWorkspaceProjects(input);
+    const listedUnder = yield* combinedListingSettings(input);
+    const { supported } = yield* listWorkspaceProjects(
+      listedUnder === undefined ? input : { ...input, listedUnder },
+    );
     // Worktrees of one checkout are separate projects over the same repository.
     const repositories = [
       ...new Map(supported.map((project) => [project.cursorKey, project])).values(),
@@ -3066,6 +3131,7 @@ export const make = Effect.gen(function* () {
         limit,
         query,
         cursorEntries,
+        owner,
       ] = JSON.parse(key) as [
         number,
         string,
@@ -3077,6 +3143,7 @@ export const make = Effect.gen(function* () {
         number | null,
         string | null,
         ReadonlyArray<[string, string]> | null,
+        string | null,
       ];
       return listUncached({
         state,
@@ -3085,6 +3152,7 @@ export const make = Effect.gen(function* () {
         ...(projectId === null ? {} : { projectId }),
         ...(projectIds === null ? {} : { projectIds }),
         ...(host === null ? {} : { host }),
+        ...(owner === null ? {} : { owner }),
         ...(limit === null ? {} : { limit }),
         ...(query === null ? {} : { query }),
         ...(cursorEntries === null ? {} : { cursors: Object.fromEntries(cursorEntries) }),
@@ -3095,38 +3163,41 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? LIST_CACHE_TTL : Duration.zero),
     },
   );
-  const list: PullRequestService["Service"]["list"] = (input) => {
-    const key = JSON.stringify([
-      listingsEpoch,
-      input.state,
-      input.involvement ?? null,
-      input.filters === undefined
-        ? null
-        : [
-            input.filters.draft ?? null,
-            input.filters.review ?? null,
-            input.filters.checks ?? null,
-            input.filters.author ?? null,
-            input.filters.labels ?? null,
-            input.filters.excludedLabels ?? null,
-          ],
-      input.projectId ?? null,
-      input.projectIds === undefined ? null : [...input.projectIds].sort(),
-      input.host ?? null,
-      input.limit ?? null,
-      input.query ?? null,
-      input.cursors === undefined
-        ? null
-        : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
-    ]);
-    // A replacement reader can join a lookup still finishing its previous reader's cancellation.
-    return Cache.get(listCache, key).pipe(
-      Effect.catchCauseIf(
-        (cause) => Cause.hasInterruptsOnly(cause),
-        (_cause) => Cache.get(listCache, key),
-      ),
-    );
-  };
+  const list: PullRequestService["Service"]["list"] = (input) =>
+    Effect.flatMap(combinedListingSettings(input), (listedUnder) => {
+      const key = JSON.stringify([
+        listingsEpoch,
+        input.state,
+        input.involvement ?? null,
+        input.filters === undefined
+          ? null
+          : [
+              input.filters.draft ?? null,
+              input.filters.review ?? null,
+              input.filters.checks ?? null,
+              input.filters.author ?? null,
+              input.filters.labels ?? null,
+              input.filters.excludedLabels ?? null,
+            ],
+        input.projectId ?? null,
+        input.projectIds === undefined ? null : [...input.projectIds].sort(),
+        input.host ?? null,
+        input.limit ?? null,
+        input.query ?? null,
+        input.cursors === undefined
+          ? null
+          : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
+        input.owner?.toLowerCase() ?? null,
+        listedUnder === undefined ? null : pullRequestListingKey(listedUnder),
+      ]);
+      // A replacement reader can join a lookup still finishing its previous reader's cancellation.
+      return Cache.get(listCache, key).pipe(
+        Effect.catchCauseIf(
+          (cause) => Cause.hasInterruptsOnly(cause),
+          (_cause) => Cache.get(listCache, key),
+        ),
+      );
+    });
 
   const checksCache = yield* Cache.makeWith(
     (key: string) => {

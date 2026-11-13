@@ -1111,6 +1111,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pull request merge squash rebase last selected"],
   },
   {
+    id: "list-pull-requests",
+    title: "List pull requests",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    searchTerms: ["pull request page hide ignore exclude project upstream fork noise"],
+  },
+  {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",
